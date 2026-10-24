@@ -13,6 +13,8 @@ const FRAGMENTS_NEEDED := 3
 const PELL_SPEED := 230.0
 const HERO_SPEED := 170.0
 const REACH := 56.0
+const PELL_R := 13.0
+const DOORWAY_X := 680.0
 const SIGHT := 300.0
 const GRUB_SPAWN := Vector2(650, 480)
 const HERO_START := Vector2(14, 400)
@@ -47,6 +49,8 @@ var actions: int = 0
 var orders: Dictionary = {}
 var pell: Vector2 = Vector2.ZERO
 var in_cart: bool = false
+var cur_room: String = "inn"
+var hero_room: String = "inn"
 var hero_pos: Vector2 = Vector2(-100, -100)
 var hero_steps: Array = []
 var hero_i: int = 0
@@ -96,8 +100,27 @@ func junk_item() -> Dictionary:
 	return {"name": "Scrap of Cloth", "kind": "junk", "power": 0, "guild": false}
 
 
-func add_obj(id: String, type: String, pos: Vector2, state: String) -> void:
-	objs[id] = {"id": id, "type": type, "pos": pos, "spawn": pos, "state": state, "item": null, "took": false, "gap": false}
+func solid_size(type: String) -> Vector2:
+	match type:
+		"pot":
+			return Vector2(36, 36)
+		"chest":
+			return Vector2(56, 36)
+		"barrel":
+			return Vector2(40, 52)
+		"table":
+			return Vector2(68, 44)
+		"board":
+			return Vector2(40, 80)
+		"cart":
+			return Vector2(60, 36)
+		"grub":
+			return Vector2(30, 30)
+	return Vector2.ZERO
+
+
+func add_obj(id: String, type: String, pos: Vector2, state: String, room: String = "inn", size: Vector2 = Vector2.ZERO) -> void:
+	objs[id] = {"id": id, "type": type, "pos": pos, "spawn": pos, "state": state, "item": null, "took": false, "gap": false, "room": room, "size": size if size != Vector2.ZERO else solid_size(type)}
 
 
 func reset_world() -> void:
@@ -109,6 +132,8 @@ func reset_world() -> void:
 	bribed = false
 	learned_this_loop = []
 	in_cart = false
+	cur_room = "inn"
+	hero_room = "inn"
 	hero_pos = Vector2(-100, -100)
 	pell = Vector2(110, 650)
 	var xs: Array = [230, 380, 540, 700]
@@ -126,6 +151,15 @@ func reset_world() -> void:
 	add_obj("table", "table", Vector2(430, 340), "empty")
 	add_obj("seam", "seam", Vector2(450, 684), "ok")
 	add_obj("cart", "cart", Vector2(400, 520), "ok")
+	# Kitchen
+	add_obj("kpot0", "pot", Vector2(200, 130), "full", "kitchen")
+	add_obj("kpot1", "pot", Vector2(330, 130), "full", "kitchen")
+	add_obj("chestC", "chest", Vector2(140, 520), "closed", "kitchen")
+	objs["chestC"].item = random_loot("gift")
+	objs["chestC"].item.guild = true
+	add_obj("counter", "counter", Vector2(520, 220), "ok", "kitchen", Vector2(280, 36))
+	add_obj("stove", "stove", Vector2(790, 130), "ok", "kitchen", Vector2(90, 70))
+	add_obj("ktable", "ktable", Vector2(480, 440), "ok", "kitchen", Vector2(170, 90))
 
 
 func stash_power() -> int:
@@ -189,7 +223,7 @@ func add_fact(id: String, text: String) -> void:
 
 
 func witness(id: String, text: String) -> void:
-	if pell.distance_to(hero_pos) <= SIGHT:
+	if hero_room == cur_room and pell.distance_to(hero_pos) <= SIGHT:
 		add_fact(id, text)
 
 
@@ -204,8 +238,8 @@ func lean_up(k: String, n: int) -> void:
 	lean[k] = mini(100, lean[k] + n)
 
 
-func drop_item(item: Dictionary, pos: Vector2) -> void:
-	floor_items.append({"item": item, "pos": pos})
+func drop_item(item: Dictionary, pos: Vector2, room: String) -> void:
+	floor_items.append({"item": item, "pos": pos, "room": room})
 
 
 func spend(n: int) -> bool:
@@ -244,6 +278,7 @@ func dominant_lean(skip: String = "") -> String:
 func begin_passage() -> void:
 	phase = Phase.PASSAGE
 	hero_pos = HERO_START
+	hero_room = "inn"
 	hero_steps = build_hero_script()
 	hero_i = 0
 	hero_t = 0.0
@@ -254,6 +289,7 @@ func begin_passage() -> void:
 func end_passage() -> void:
 	phase = Phase.SHIFT
 	hero_pos = Vector2(-100, -100)
+	hero_room = "inn"
 	in_cart = false
 	actions = SHIFT_ACTIONS
 	if suspicion >= 40:
@@ -413,6 +449,15 @@ func build_hero_script() -> Array:
 		s.append(step_act("pot", o.id, 0.7))
 	s.append(step_move(Vector2(775, 205)))
 	s.append(step_act("barrel", "barrel", 1.0))
+	s.append(step_move(Vector2(DOORWAY_X, 690)))
+	s.append({"k": "warp", "room": "kitchen", "p": Vector2(DOORWAY_X, 95)})
+	for kid in ["kpot0", "kpot1"]:
+		s.append(step_move(objs[kid].pos + Vector2(0, 55)))
+		s.append(step_act("pot", kid, 0.7))
+	s.append(step_move(Vector2(200, 520)))
+	s.append(step_act("chestC", "chestC", 1.2))
+	s.append(step_move(Vector2(DOORWAY_X, 70)))
+	s.append({"k": "warp", "room": "inn", "p": Vector2(DOORWAY_X, 665)})
 	s.append(step_move(Vector2(165, 560)))
 	s.append(step_act("chestA", "chestA", 1.2))
 	s.append(step_move(Vector2(735, 590)))
@@ -428,6 +473,11 @@ func update_hero(dt: float) -> void:
 		end_passage()
 		return
 	var st: Dictionary = hero_steps[hero_i]
+	if st.k == "warp":
+		hero_room = st.room
+		hero_pos = st.p
+		hero_i += 1
+		return
 	if st.k == "move":
 		var d: Vector2 = st.p - hero_pos
 		var stp: float = HERO_SPEED * dt
@@ -446,7 +496,7 @@ func update_hero(dt: float) -> void:
 			hero_started = false
 			hero_i += 1
 	# Being near the Hero in plain sight raises Awareness.
-	if not in_cart and pell.distance_to(hero_pos) < 110.0:
+	if not in_cart and hero_room == cur_room and pell.distance_to(hero_pos) < 110.0:
 		hero.awareness = minf(100.0, hero.awareness + 14.0 * dt)
 
 
@@ -478,9 +528,9 @@ func hero_do(a: String, o: Dictionary) -> void:
 				bark("*SMASH*  Loot?")
 				witness("hero_pots", "The Hero smashes every pot he walks past.")
 				if randf() < 0.5:
-					drop_item({"name": "Coin", "kind": "coin", "power": 5, "guild": false}, o.pos + Vector2(randi_range(-25, 25), 35))
+					drop_item({"name": "Coin", "kind": "coin", "power": 5, "guild": false}, o.pos + Vector2(randi_range(-25, 25), 35), o.room)
 				elif randf() < 0.5:
-					drop_item(random_loot("gift" if randf() < 0.5 else "consumable"), o.pos + Vector2(randi_range(-25, 25), 35))
+					drop_item(random_loot("gift" if randf() < 0.5 else "consumable"), o.pos + Vector2(randi_range(-25, 25), 35), o.room)
 			else:
 				bark("Nah. Leave it.")
 		"barrel":
@@ -493,10 +543,14 @@ func hero_do(a: String, o: Dictionary) -> void:
 			o.item = null
 			bark("Ooh, a %s! Time to upgrade." % taken.name)
 			witness("hero_chest", "The Hero empties the first chest and dumps his old gear on the floor.")
-			drop_item(random_loot("gear"), o.pos + Vector2(55, -35))
-			drop_item(junk_item(), o.pos + Vector2(70, 10))
+			drop_item(random_loot("gear"), o.pos + Vector2(55, -35), o.room)
+			drop_item(junk_item(), o.pos + Vector2(70, 10), o.room)
 			if loop_no >= 3 and not found.has("letter"):
-				drop_item({"name": "Hero's Crumpled Letter", "kind": "knowledge", "power": 0, "guild": false}, o.pos + Vector2(20, -60))
+				drop_item({"name": "Hero's Crumpled Letter", "kind": "knowledge", "power": 0, "guild": false}, o.pos + Vector2(20, -60), o.room)
+		"chestC":
+			o.state = "open"
+			bark("Not hungry. Pantry food is for NPCs.")
+			witness("hero_pantry", "The Hero skips the pantry chest in the kitchen. Food is for people without quests.")
 		"chestB":
 			o.state = "open"
 			bark("Bag's full. I'll come back. (He never does.)")
@@ -509,7 +563,7 @@ func hero_do(a: String, o: Dictionary) -> void:
 				o.pos = o.spawn + Vector2(-70, -70)
 				bark("Goblin! *WHACK*")
 				witness("hero_grub", "The Hero clobbers Grub on sight. Grub is out cold until someone drags him back.")
-				drop_item({"name": "Coin", "kind": "coin", "power": 5, "guild": false}, o.pos + Vector2(30, 20))
+				drop_item({"name": "Coin", "kind": "coin", "power": 5, "guild": false}, o.pos + Vector2(30, 20), o.room)
 
 
 # =========================================================== interaction
@@ -519,12 +573,14 @@ func reach_list() -> Array:
 	var out: Array = []
 	for id in objs:
 		var o: Dictionary = objs[id]
-		if o.type == "exit":
+		if o.room != cur_room or o.type in ["counter", "stove", "ktable"]:
 			continue
 		var d: float = pell.distance_to(o.pos)
 		if d <= REACH + (30.0 if o.type == "board" else 0.0):
 			out.append({"d": d, "kind": "obj", "ref": o})
 	for fi in floor_items:
+		if fi.room != cur_room:
+			continue
 		var d2: float = pell.distance_to(fi.pos)
 		if d2 <= REACH:
 			out.append({"d": d2 - 20.0, "kind": "floor", "ref": fi})
@@ -594,7 +650,7 @@ func do_interact(t: Dictionary, alt: bool) -> void:
 		if o.type == "cart":
 			in_cart = not in_cart
 			if in_cart:
-				pell = o.pos + Vector2(0, 28)
+				pell = o.pos + Vector2(0, 42)
 				say("You duck into the cart. Nobody looks at a cleaning cart.")
 		return
 	match o.type:
@@ -809,6 +865,37 @@ func handle_note_key(k: int) -> void:
 		menu = ""
 
 
+func blocked(p: Vector2) -> bool:
+	## Solid furniture, chests, pots etc. cannot be walked over.
+	for id in objs:
+		var o: Dictionary = objs[id]
+		if o.room == cur_room and o.size.x > 0.0:
+			if Rect2(o.pos - o.size / 2.0, o.size).grow(PELL_R).has_point(p):
+				return true
+	return false
+
+
+func move_pell(step: Vector2) -> void:
+	var stuck: bool = blocked(pell)  # never trap Pell if something moved onto them
+	var np: Vector2 = pell + Vector2(step.x, 0)
+	np.x = clampf(np.x, ROOM.position.x + 12.0, ROOM.end.x - 12.0)
+	if stuck or not blocked(np):
+		pell = np
+	np = pell + Vector2(0, step.y)
+	np.y = clampf(np.y, ROOM.position.y + 12.0, ROOM.end.y - 12.0)
+	if stuck or not blocked(np):
+		pell = np
+
+
+func check_doorways() -> void:
+	if cur_room == "inn" and pell.y >= ROOM.end.y - 16.0 and absf(pell.x - DOORWAY_X) < 45.0:
+		cur_room = "kitchen"
+		pell = Vector2(DOORWAY_X, ROOM.position.y + 45.0)
+	elif cur_room == "kitchen" and pell.y <= ROOM.position.y + 16.0 and absf(pell.x - DOORWAY_X) < 45.0:
+		cur_room = "inn"
+		pell = Vector2(DOORWAY_X, ROOM.end.y - 45.0)
+
+
 func _process(delta: float) -> void:
 	if phase == Phase.PASSAGE or phase == Phase.SHIFT or phase == Phase.DAWN:
 		if menu == "" and not show_journal and not in_cart:
@@ -822,9 +909,8 @@ func _process(delta: float) -> void:
 			if Input.is_physical_key_pressed(KEY_D) or Input.is_physical_key_pressed(KEY_RIGHT):
 				v.x += 1
 			if phase != Phase.DAWN:
-				pell += v.normalized() * PELL_SPEED * delta
-				pell.x = clampf(pell.x, ROOM.position.x + 12.0, ROOM.end.x - 12.0)
-				pell.y = clampf(pell.y, ROOM.position.y + 12.0, ROOM.end.y - 12.0)
+				move_pell(v.normalized() * PELL_SPEED * delta)
+				check_doorways()
 	if phase == Phase.PASSAGE and menu == "" and not show_journal:
 		var hdt: float = delta * (3.0 if Input.is_physical_key_pressed(KEY_SPACE) else 1.0)
 		update_hero(hdt)
@@ -875,19 +961,28 @@ func _draw() -> void:
 
 
 func draw_world() -> void:
-	box(ROOM, Color(0.36, 0.27, 0.19), Color(0.15, 0.1, 0.07))
+	var inn: bool = cur_room == "inn"
+	box(ROOM, Color(0.36, 0.27, 0.19) if inn else Color(0.42, 0.42, 0.45), Color(0.15, 0.1, 0.07))
 	for i in range(1, 8):
-		draw_line(Vector2(ROOM.position.x, ROOM.position.y + i * 80), Vector2(ROOM.end.x, ROOM.position.y + i * 80), Color(0.3, 0.22, 0.15), 1.0)
-	txt(Vector2(30, 82), "THE SLEEPING STAG - INN", 13, Color(0.7, 0.6, 0.45))
-	draw_circle(GRUB_SPAWN, 26.0, Color(0.3, 0.22, 0.15))
-	txt(GRUB_SPAWN + Vector2(-22, 44), "(spawn)", 11, Color(0.55, 0.45, 0.35))
+		draw_line(Vector2(ROOM.position.x, ROOM.position.y + i * 80), Vector2(ROOM.end.x, ROOM.position.y + i * 80), Color(0.3, 0.22, 0.15) if inn else Color(0.33, 0.33, 0.36), 1.0)
+	txt(Vector2(30, 82), "THE SLEEPING STAG - INN" if inn else "INN KITCHEN", 13, Color(0.7, 0.6, 0.45))
+	if inn:
+		draw_circle(GRUB_SPAWN, 26.0, Color(0.3, 0.22, 0.15))
+		txt(GRUB_SPAWN + Vector2(-22, 44), "(spawn)", 11, Color(0.55, 0.45, 0.35))
+		box(Rect2(ROOM.end.x - 8, 380, 10, 80), Color(0.2, 0.3, 0.2))
+		txt(Vector2(ROOM.end.x - 52, 475), "to Forest", 11, Color(0.55, 0.7, 0.5))
+		box(Rect2(DOORWAY_X - 45, ROOM.end.y - 6, 90, 8), Color(0.2, 0.3, 0.2))
+		txt(Vector2(DOORWAY_X - 32, ROOM.end.y - 12), "Kitchen v", 11, Color(0.6, 0.8, 0.55))
+	else:
+		box(Rect2(DOORWAY_X - 45, ROOM.position.y - 2, 90, 8), Color(0.2, 0.3, 0.2))
+		txt(Vector2(DOORWAY_X - 22, ROOM.position.y + 20), "Inn ^", 11, Color(0.6, 0.8, 0.55))
 	for id in objs:
-		draw_obj(objs[id])
-	box(Rect2(ROOM.end.x - 8, 380, 10, 80), Color(0.2, 0.3, 0.2))
-	txt(Vector2(ROOM.end.x - 52, 475), "to Forest", 11, Color(0.55, 0.7, 0.5))
+		if objs[id].room == cur_room:
+			draw_obj(objs[id])
 	for fi in floor_items:
-		draw_floor_item(fi)
-	if phase == Phase.PASSAGE or (phase == Phase.DAWN and false):
+		if fi.room == cur_room:
+			draw_floor_item(fi)
+	if phase == Phase.PASSAGE and hero_room == cur_room:
 		draw_circle(hero_pos, 17.0, Color(0.95, 0.8, 0.2))
 		draw_circle(hero_pos + Vector2(0, -22), 9.0, Color(0.98, 0.88, 0.7))
 		txt(hero_pos + Vector2(-16, 36), "HERO", 11, Color(1, 0.9, 0.4))
@@ -913,8 +1008,9 @@ func draw_world() -> void:
 				txt(Vector2(38, 687), s, 15, Color(1, 0.95, 0.6))
 				break
 	if phase == Phase.PASSAGE:
-		box(Rect2(Vector2(240, 66), Vector2(380, 24)), Color(0, 0, 0, 0.6))
-		txt(Vector2(248, 84), "HERO'S PASSAGE - watch, learn, hide.  [Space] fast-forward", 13)
+		box(Rect2(Vector2(240, 66), Vector2(470, 24)), Color(0, 0, 0, 0.6))
+		var where: String = "" if hero_room == cur_room else "  (Hero is in the %s)" % hero_room
+		txt(Vector2(248, 84), "HERO'S PASSAGE - watch, hide. [Space] fast-forward" + where, 13)
 
 
 func draw_obj(o: Dictionary) -> void:
@@ -965,6 +1061,9 @@ func draw_obj(o: Dictionary) -> void:
 		"seam":
 			draw_line(p + Vector2(-60, 0), p + Vector2(60, 0), Color(0.6, 0.85, 1.0), 2.0)
 			txt(p + Vector2(-26, -8), "THE SEAM", 11, Color(0.6, 0.85, 1.0))
+		"counter", "stove", "ktable":
+			box(Rect2(p - o.size / 2.0, o.size), Color(0.3, 0.3, 0.34), Color(0.12, 0.12, 0.14))
+			txt(p + Vector2(-24, 4), String(o.type).to_upper(), 11, Color(0.75, 0.75, 0.8))
 		"cart":
 			box(Rect2(p - Vector2(30, 18), Vector2(60, 36)), Color(0.35, 0.4, 0.45), Color(0.15, 0.17, 0.2))
 			txt(p + Vector2(-24, 5), "CART" if not in_cart else "(you)", 11, Color(0.8, 0.85, 0.9))
@@ -1002,7 +1101,7 @@ func draw_panel() -> void:
 		y += 6.0
 		bar(Vector2(x, y), 360.0, hero.awareness / 100.0, Color(0.9, 0.7, 0.25))
 	else:
-		txt(Vector2(x, y), "Hero Awareness: ??? (in_cart until Act 4)", 13, Color(0.6, 0.6, 0.65))
+		txt(Vector2(x, y), "Hero Awareness: ??? (hidden until Act 4)", 13, Color(0.6, 0.6, 0.65))
 		y += 6.0
 		bar(Vector2(x, y), 360.0, 0.0, Color(0.9, 0.7, 0.25))
 	y += 32.0

@@ -29,6 +29,8 @@ Everything is drawn in code (`scripts/main.gd`), no assets needed.
 - Hidden Leanings (Control / Defiance / Compassion / Charm) rise from what you do and pick the ending text; second leaning is the "blend".
 - Hero drives (greed / mercy) shift from your notes and gifts and change his behaviour.
 - Guild Suspicion and Hero Awareness meters with their consequences.
+- Solid furniture: pots, chests, barrel, tables, cart and Grub block movement.
+- Two rooms (Inn + Kitchen) joined by the doorway at the south wall of the Inn; the Hero visits both, so you can only watch one room at a time.
 
 ## Not in the demo (see the GDD)
 Real-time combat, adaptive Hero AI, multiple regions, NPC Bonds/Awakening, path ability trees, Web/Lair systems, save files.
