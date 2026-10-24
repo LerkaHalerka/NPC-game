@@ -1,1 +1,34 @@
-# NPC-game
+# NPC-game — *Afterward* (One Shift demo)
+
+Godot **4.3+** prototype of the "One shift" milestone from the Game Design Document.
+Open the folder in Godot (Project Manager → Import → `project.godot`) and press F5.
+Everything is drawn in code (`scripts/main.gd`), no assets needed.
+
+## Controls
+| Key | Action |
+|---|---|
+| WASD / arrows | Move |
+| E / F | Primary / alternate action on the nearest thing (prompt shown at the bottom) |
+| 1–8 | Use a satchel item (read letters, eat potions) |
+| Tab | Memory Journal |
+| Space | Fast-forward the Hero's passage |
+| Enter | Advance phase / finish the shift |
+| F1 | Debug: hidden Awareness, Leanings, Hero drives |
+
+## The loop (one Cycle)
+1. **Dawn** – plan.
+2. **Hero's passage** – a scripted Hero smashes pots, kicks doors and the corner barrel, empties one chest, skips the other, clobbers Grub, and dumps old gear. Stay close enough to *witness* things (that is how Journal facts are learned), far enough not to raise his Awareness, or hide in the cart.
+3. **Shift** – fixed action budget (8) vs. more work orders than actions. Restock pots/chests, repair the door, return Grub, pin a notice. Loot is free but risky: taking a chest's item leaves a *gap* unless you swap in a Scrap of Cloth.
+4. **Inspection** – Supervisor Bramm scores Diligence, changes Suspicion (raid at 80+ confiscates the stash). Bribe him with coin.
+5. **Rebirth** – everything resets except Journal, Memory Depth, Leanings, Hero state and the **stash in the Seam**. Items on you and coin are lost.
+
+## Mechanics implemented
+- Hero's progress = your progress: Hero act rises every 2 loops, so leftovers get better; gear in the Seam enlarges your satchel.
+- Knowledge as keys: the barrel fragment only opens if you *saw* the Hero kick it; Grub only talks on a later loop.
+- 3 Memory Fragments (barrel, Grub, the Hero's letter from loop 3+) → Memory Depth up (bigger stash) → ending.
+- Hidden Leanings (Control / Defiance / Compassion / Charm) rise from what you do and pick the ending text; second leaning is the "blend".
+- Hero drives (greed / mercy) shift from your notes and gifts and change his behaviour.
+- Guild Suspicion and Hero Awareness meters with their consequences.
+
+## Not in the demo (see the GDD)
+Real-time combat, adaptive Hero AI, multiple regions, NPC Bonds/Awakening, path ability trees, Web/Lair systems, save files.
