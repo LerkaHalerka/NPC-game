@@ -69,15 +69,59 @@ var menu: String = ""
 var show_journal: bool = false
 var show_debug: bool = false
 var font: Font = ThemeDB.fallback_font
+var cv: CanvasItem
+var shapes_on: bool = true
+var text_on: bool = true
+var ui_overlay: Node2D
+const PIXEL_SIZE := 4.0
 
 
 func _ready() -> void:
 	randomize()
+	cv = self
+	setup_pixel_layers()
 	reset_world()
 	say("I wake up. Again. This time I remember yesterday.")
 
 
 # =========================================================== setup
+
+func setup_pixel_layers() -> void:
+	# Layer 1: pixelate everything drawn by this node (the world), left of the side panel.
+	var pix_layer: CanvasLayer = CanvasLayer.new()
+	pix_layer.layer = 1
+	add_child(pix_layer)
+	var shader: Shader = Shader.new()
+	shader.code = """
+shader_type canvas_item;
+uniform sampler2D screen_tex : hint_screen_texture, filter_nearest;
+uniform float px = 3.0;
+uniform float levels = 7.0;
+void fragment() {
+	vec2 logical = vec2(1280.0, 720.0);
+	vec2 uv = (floor(SCREEN_UV * logical / px) + 0.5) * px / logical;
+	vec3 c = texture(screen_tex, uv).rgb;
+	COLOR = vec4(floor(c * levels + 0.5) / levels, 1.0);
+}
+"""
+	var mat: ShaderMaterial = ShaderMaterial.new()
+	mat.shader = shader
+	mat.set_shader_parameter("px", PIXEL_SIZE)
+	var rect: ColorRect = ColorRect.new()
+	rect.position = Vector2.ZERO
+	rect.size = Vector2(PANEL_X - 13.0, 720.0)
+	rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	rect.material = mat
+	pix_layer.add_child(rect)
+	# Layer 2: crisp text/UI on top.
+	var ui_layer: CanvasLayer = CanvasLayer.new()
+	ui_layer.layer = 2
+	add_child(ui_layer)
+	ui_overlay = Node2D.new()
+	ui_overlay.set_script(load("res://scripts/overlay.gd"))
+	ui_overlay.main = self
+	ui_layer.add_child(ui_overlay)
+
 
 func tier() -> int:
 	return mini(5, 1 + floori((loop_no - 1) / 2.0))
@@ -917,22 +961,41 @@ func _process(delta: float) -> void:
 	if bark_time > 0.0:
 		bark_time -= delta
 	queue_redraw()
+	if ui_overlay != null:
+		ui_overlay.queue_redraw()
 
 
 # =========================================================== drawing
 
+func d_rect(r: Rect2, c: Color, filled: bool = true, w: float = -1.0) -> void:
+	if shapes_on:
+		cv.draw_rect(r, c, filled, w)
+
+
+func d_circle(p: Vector2, r: float, c: Color, filled: bool = true, w: float = -1.0) -> void:
+	if shapes_on:
+		cv.draw_circle(p, r, c, filled, w)
+
+
+func d_line(a: Vector2, b: Vector2, c: Color, w: float = -1.0) -> void:
+	if shapes_on:
+		cv.draw_line(a, b, c, w)
+
+
 func txt(pos: Vector2, s: String, size: int = 15, col: Color = Color(0.93, 0.9, 0.82)) -> void:
-	draw_string(font, pos, s, HORIZONTAL_ALIGNMENT_LEFT, -1, size, col)
+	if text_on:
+		cv.draw_string(font, pos, s, HORIZONTAL_ALIGNMENT_LEFT, -1, size, col)
 
 
 func para(pos: Vector2, s: String, width: float, size: int = 15, col: Color = Color(0.93, 0.9, 0.82)) -> void:
-	draw_multiline_string(font, pos, s, HORIZONTAL_ALIGNMENT_LEFT, width, size, -1, col)
+	if text_on:
+		cv.draw_multiline_string(font, pos, s, HORIZONTAL_ALIGNMENT_LEFT, width, size, -1, col)
 
 
 func box(r: Rect2, col: Color, border: Color = Color(0, 0, 0, 0)) -> void:
-	draw_rect(r, col, true)
+	d_rect(r, col, true)
 	if border.a > 0.0:
-		draw_rect(r, border, false, 2.0)
+		d_rect(r, border, false, 2.0)
 
 
 func bar(pos: Vector2, w: float, frac: float, col: Color) -> void:
@@ -941,7 +1004,21 @@ func bar(pos: Vector2, w: float, frac: float, col: Color) -> void:
 
 
 func _draw() -> void:
+	## Pass 1 (this node): world shapes only. A shader on the layer above pixelates them.
+	cv = self
+	shapes_on = true
+	text_on = false
 	draw_world()
+
+
+func draw_overlay(c: CanvasItem) -> void:
+	## Pass 2 (crisp layer on top): world labels, HUD, panel and all screens.
+	cv = c
+	shapes_on = false
+	text_on = true
+	draw_world()
+	shapes_on = true
+	draw_world_hud()
 	draw_panel()
 	match phase:
 		Phase.DAWN:
@@ -964,10 +1041,10 @@ func draw_world() -> void:
 	var inn: bool = cur_room == "inn"
 	box(ROOM, Color(0.36, 0.27, 0.19) if inn else Color(0.42, 0.42, 0.45), Color(0.15, 0.1, 0.07))
 	for i in range(1, 8):
-		draw_line(Vector2(ROOM.position.x, ROOM.position.y + i * 80), Vector2(ROOM.end.x, ROOM.position.y + i * 80), Color(0.3, 0.22, 0.15) if inn else Color(0.33, 0.33, 0.36), 1.0)
+		d_line(Vector2(ROOM.position.x, ROOM.position.y + i * 80), Vector2(ROOM.end.x, ROOM.position.y + i * 80), Color(0.3, 0.22, 0.15) if inn else Color(0.33, 0.33, 0.36), 1.0)
 	txt(Vector2(30, 82), "THE SLEEPING STAG - INN" if inn else "INN KITCHEN", 13, Color(0.7, 0.6, 0.45))
 	if inn:
-		draw_circle(GRUB_SPAWN, 26.0, Color(0.3, 0.22, 0.15))
+		d_circle(GRUB_SPAWN, 26.0, Color(0.3, 0.22, 0.15))
 		txt(GRUB_SPAWN + Vector2(-22, 44), "(spawn)", 11, Color(0.55, 0.45, 0.35))
 		box(Rect2(ROOM.end.x - 8, 380, 10, 80), Color(0.2, 0.3, 0.2))
 		txt(Vector2(ROOM.end.x - 52, 475), "to Forest", 11, Color(0.55, 0.7, 0.5))
@@ -983,16 +1060,20 @@ func draw_world() -> void:
 		if fi.room == cur_room:
 			draw_floor_item(fi)
 	if phase == Phase.PASSAGE and hero_room == cur_room:
-		draw_circle(hero_pos, 17.0, Color(0.95, 0.8, 0.2))
-		draw_circle(hero_pos + Vector2(0, -22), 9.0, Color(0.98, 0.88, 0.7))
+		d_circle(hero_pos, 17.0, Color(0.95, 0.8, 0.2))
+		d_circle(hero_pos + Vector2(0, -22), 9.0, Color(0.98, 0.88, 0.7))
 		txt(hero_pos + Vector2(-16, 36), "HERO", 11, Color(1, 0.9, 0.4))
-		if bark_time > 0.0:
-			box(Rect2(hero_pos + Vector2(-8, -78), Vector2(font.get_string_size(bark_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x + 14, 24)), Color(1, 1, 1, 0.92))
-			txt(hero_pos + Vector2(-1, -61), bark_text, 13, Color(0.1, 0.1, 0.1))
 	if not in_cart:
-		draw_circle(pell, 13.0, Color(0.3, 0.55, 0.85))
-		draw_line(pell + Vector2(10, 12), pell + Vector2(26, -14), Color(0.8, 0.65, 0.3), 3.0)
+		d_circle(pell, 13.0, Color(0.3, 0.55, 0.85))
+		d_line(pell + Vector2(10, 12), pell + Vector2(26, -14), Color(0.8, 0.65, 0.3), 3.0)
 		txt(pell + Vector2(-9, 30), "Pell", 11, Color(0.6, 0.8, 1))
+
+
+func draw_world_hud() -> void:
+	## Crisp (non-pixelated) bits that sit on top of the world.
+	if phase == Phase.PASSAGE and hero_room == cur_room and bark_time > 0.0:
+		box(Rect2(hero_pos + Vector2(-8, -78), Vector2(font.get_string_size(bark_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x + 14, 24)), Color(1, 1, 1, 0.92))
+		txt(hero_pos + Vector2(-1, -61), bark_text, 13, Color(0.1, 0.1, 0.1))
 	if phase == Phase.SHIFT or phase == Phase.PASSAGE:
 		var list: Array = reach_list()
 		for t in list:
@@ -1003,7 +1084,6 @@ func draw_world() -> void:
 					s += "[E] " + lb[0]
 				if lb[1] != "":
 					s += "    [F] " + lb[1]
-				box(Rect2(ROOM.position.x, ROOM.end.y - 4, ROOM.size.x, 0), Color(0, 0, 0, 0))
 				box(Rect2(Vector2(30, 668), Vector2(820, 26)), Color(0, 0, 0, 0.7))
 				txt(Vector2(38, 687), s, 15, Color(1, 0.95, 0.6))
 				break
@@ -1018,10 +1098,10 @@ func draw_obj(o: Dictionary) -> void:
 	match o.type:
 		"pot":
 			if o.state == "full":
-				draw_circle(p, 18.0, Color(0.65, 0.4, 0.25))
-				draw_circle(p + Vector2(0, -12), 10.0, Color(0.5, 0.3, 0.2))
+				d_circle(p, 18.0, Color(0.65, 0.4, 0.25))
+				d_circle(p + Vector2(0, -12), 10.0, Color(0.5, 0.3, 0.2))
 			else:
-				draw_circle(p, 18.0, Color(0.25, 0.17, 0.12), false, 2.0)
+				d_circle(p, 18.0, Color(0.25, 0.17, 0.12), false, 2.0)
 				txt(p + Vector2(-14, 4), "x_x", 12, Color(0.7, 0.4, 0.3))
 				if phase == Phase.SHIFT:
 					txt(p + Vector2(-20, -24), "broken", 11, Color(0.9, 0.5, 0.4))
@@ -1042,7 +1122,7 @@ func draw_obj(o: Dictionary) -> void:
 				txt(p + Vector2(-8, 58), "broken", 11, Color(0.9, 0.5, 0.4))
 		"grub":
 			var gc: Color = Color(0.4, 0.7, 0.3) if o.state == "ok" else Color(0.3, 0.45, 0.25)
-			draw_circle(p, 16.0, gc)
+			d_circle(p, 16.0, gc)
 			txt(p + Vector2(-12, 5), "ò_ó" if o.state == "ok" else "x_x", 12, Color(0.1, 0.2, 0.05))
 			txt(p + Vector2(-14, -22), "Grub" + (" (out cold)" if o.state == "out" else ""), 11, Color(0.7, 0.9, 0.6))
 		"board":
@@ -1053,13 +1133,13 @@ func draw_obj(o: Dictionary) -> void:
 		"barrel":
 			box(Rect2(p - Vector2(20, 26), Vector2(40, 52)), Color(0.45, 0.3, 0.15), Color(0.15, 0.1, 0.05))
 			if o.state == "kicked":
-				draw_line(p + Vector2(34, -30), p + Vector2(30, 30), Color(0.6, 0.85, 1.0), 3.0)
+				d_line(p + Vector2(34, -30), p + Vector2(30, 30), Color(0.6, 0.85, 1.0), 3.0)
 				txt(p + Vector2(-30, 44), "crack", 11, Color(0.6, 0.85, 1.0))
 		"table":
 			box(Rect2(p - Vector2(34, 22), Vector2(68, 44)), Color(0.5, 0.35, 0.2), Color(0.2, 0.12, 0.05))
 			txt(p + Vector2(-26, 5), "gift table" if o.state == "empty" else "gift!", 11, Color(0.9, 0.8, 0.6))
 		"seam":
-			draw_line(p + Vector2(-60, 0), p + Vector2(60, 0), Color(0.6, 0.85, 1.0), 2.0)
+			d_line(p + Vector2(-60, 0), p + Vector2(60, 0), Color(0.6, 0.85, 1.0), 2.0)
 			txt(p + Vector2(-26, -8), "THE SEAM", 11, Color(0.6, 0.85, 1.0))
 		"counter", "stove", "ktable":
 			box(Rect2(p - o.size / 2.0, o.size), Color(0.3, 0.3, 0.34), Color(0.12, 0.12, 0.14))
@@ -1074,7 +1154,7 @@ func draw_floor_item(fi: Dictionary) -> void:
 	var col: Color = Color(1, 0.85, 0.2) if it.kind == "coin" else Color(0.9, 0.9, 1.0)
 	if it.kind == "knowledge":
 		col = Color(0.7, 1.0, 0.8)
-	draw_rect(Rect2(fi.pos - Vector2(7, 7), Vector2(14, 14)), col, true)
+	d_rect(Rect2(fi.pos - Vector2(7, 7), Vector2(14, 14)), col, true)
 	if pell.distance_to(fi.pos) < 120.0:
 		txt(fi.pos + Vector2(-30, -12), String(it.name), 11, Color(1, 1, 1))
 

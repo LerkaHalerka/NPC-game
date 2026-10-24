@@ -30,6 +30,7 @@ Everything is drawn in code (`scripts/main.gd`), no assets needed.
 - Hero drives (greed / mercy) shift from your notes and gifts and change his behaviour.
 - Guild Suspicion and Hero Awareness meters with their consequences.
 - Solid furniture: pots, chests, barrel, tables, cart and Grub block movement.
+- Pixel-art look: the world is rendered through a pixelation shader (block size `PIXEL_SIZE` in `main.gd`, use a divisor of 1280 like 2, 4 or 5); text and UI stay crisp on a layer above.
 - Two rooms (Inn + Kitchen) joined by the doorway at the south wall of the Inn; the Hero visits both, so you can only watch one room at a time.
 
 ## Not in the demo (see the GDD)
