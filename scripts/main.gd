@@ -416,7 +416,7 @@ func end_passage() -> void:
 		actions -= 1
 		say("The Hero is suspicious of you. You feel eyes on your back. One fewer action.")
 	actions = maxi(3, actions)
-	say("Shift begins: %d work orders, %d actions. Plot choices cost an action too. Strong Tea (+2) at the bar." % [orders.size(), actions])
+	say("Shift begins: %d work orders, %d actions. Plot choices cost an action too." % [orders.size(), actions])
 
 
 func end_shift() -> void:
