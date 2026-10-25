@@ -83,11 +83,15 @@ var dialogue: Array = []   # blocking story boxes: {who, text}
 var toast_text: String = ""
 var toast_time: float = 0.0
 const PIXEL_SIZE := 4.0
+## Sprites are already pixel art, so the whole-screen pixelation shader is off by default.
+const PIXELATE_WORLD := false
+const SpriteData := preload("res://scripts/sprite_data.gd")
 
 
 func _ready() -> void:
 	randomize()
 	cv = self
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	setup_pixel_layers()
 	reset_world()
 	say("I wake up. Again. This time I remember yesterday.")
@@ -123,6 +127,7 @@ void fragment() {
 	rect.size = Vector2(PANEL_X - 13.0, 720.0)
 	rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	rect.material = mat
+	rect.visible = PIXELATE_WORLD
 	pix_layer.add_child(rect)
 	# Layer 2: crisp text/UI on top.
 	var ui_layer: CanvasLayer = CanvasLayer.new()
@@ -207,7 +212,7 @@ func reset_world() -> void:
 	add_obj("table", "table", Vector2(430, 340), "empty")
 	add_obj("seam", "seam", Vector2(450, 684), "ok")
 	add_obj("cart", "cart", Vector2(400, 520), "ok")
-	add_obj("innkeeper", "innkeeper", Vector2(640, 250), "ok", "inn", Vector2(150, 48))
+	add_obj("innkeeper", "innkeeper", Vector2(640, 250), "ok", "inn", Vector2(168, 48))
 	# Kitchen
 	add_obj("kpot0", "pot", Vector2(200, 130), "full", "kitchen")
 	add_obj("kpot1", "pot", Vector2(330, 130), "full", "kitchen")
@@ -215,8 +220,8 @@ func reset_world() -> void:
 	objs["chestC"].item = random_loot("gift")
 	objs["chestC"].item.guild = true
 	add_obj("counter", "counter", Vector2(520, 220), "ok", "kitchen", Vector2(280, 36))
-	add_obj("stove", "stove", Vector2(790, 130), "ok", "kitchen", Vector2(90, 70))
-	add_obj("ktable", "ktable", Vector2(480, 440), "ok", "kitchen", Vector2(170, 90))
+	add_obj("stove", "stove", Vector2(790, 130), "ok", "kitchen", Vector2(56, 56))
+	add_obj("ktable", "ktable", Vector2(480, 440), "ok", "kitchen", Vector2(168, 84))
 
 
 func total_coin() -> int:
@@ -1256,9 +1261,68 @@ func cylinder(center: Vector2, r: float, h: float, top: Color) -> void:
 	d_poly(ellipse_pts(c0 + Vector2(0, -h), rx, ry), top)
 
 
-func person(p: Vector2, body: Color, r: float, tall: float) -> void:
+var tex_cache: Dictionary = {}
+
+
+func sprite(sname: String) -> Texture2D:
+	if not tex_cache.has(sname):
+		var path: String = "res://assets/sprites/%s.png" % sname
+		tex_cache[sname] = load(path) if ResourceLoader.exists(path) else null
+	return tex_cache[sname]
+
+
+func d_sprite(sname: String, wpos: Vector2, z: float = 0.0) -> bool:
+	## Draws a sprite anchored at a world position (its feet / footprint centre). False if the PNG is missing.
+	var tex: Texture2D = sprite(sname)
+	if tex == null:
+		return false
+	var a: Vector2 = SpriteData.ANCHORS.get(sname, Vector2(tex.get_width() / 2.0, tex.get_height()))
+	if shapes_on:
+		cv.draw_texture(tex, (iso(wpos, z) - a).round())
+	return true
+
+
+func obj_sprite(o: Dictionary) -> String:
+	match o.type:
+		"pot":
+			return "pot_full" if o.state == "full" else "pot_broken"
+		"chest":
+			return "chest_open" if o.state == "open" else "chest_closed"
+		"barrel":
+			return "barrel"
+		"table":
+			return "table"
+		"board":
+			return "board_empty" if o.state == "empty" else "board_note"
+		"cart":
+			return "cart"
+		"grub":
+			return "grub_ok" if o.state == "ok" else "grub_out"
+	return ""
+
+
+func item_sprite(it: Dictionary) -> String:
+	match it.kind:
+		"coin":
+			return "item_coin"
+		"gear":
+			return "item_sword"
+		"gift":
+			return "item_bread"
+		"consumable":
+			return "item_potion"
+		"knowledge":
+			return "item_letter"
+		"junk":
+			return "item_cloth"
+	return "item_sack"
+
+
+func person(p: Vector2, body: Color, r: float, tall: float, sname: String = "") -> void:
 	var c: Vector2 = iso(p)
 	d_poly(ellipse_pts(c, r * 1.5, r * 0.75), Color(0, 0, 0, 0.35))
+	if sname != "" and d_sprite(sname, p):
+		return
 	d_circle(c + Vector2(0, -tall * 0.45), r, body)
 	d_circle(c + Vector2(0, -tall), r * 0.7, Color(0.98, 0.85, 0.7))
 
@@ -1301,10 +1365,11 @@ func draw_world() -> void:
 			"floor":
 				draw_floor_item(it.f)
 			"hero":
-				person(hero_pos, Color(0.95, 0.8, 0.2), 12.0, 40.0)
+				person(hero_pos, Color(0.95, 0.8, 0.2), 12.0, 40.0, "hero")
 			"pell":
-				person(pell, Color(0.3, 0.55, 0.85), 10.0, 32.0)
-				d_line(iso(pell) + Vector2(8, -12), iso(pell) + Vector2(20, -38), Color(0.8, 0.65, 0.3), 3.0)
+				person(pell, Color(0.3, 0.55, 0.85), 10.0, 32.0, "pell")
+				if sprite("pell") == null:
+					d_line(iso(pell) + Vector2(8, -12), iso(pell) + Vector2(20, -38), Color(0.8, 0.65, 0.3), 3.0)
 	draw_marker()
 	draw_labels()
 
@@ -1347,6 +1412,12 @@ func draw_room_shell(floor_col: Color, wall_col: Color, inn: bool) -> void:
 
 
 func draw_chunk(o: Dictionary, c: Vector2, s: Vector2) -> void:
+	var block: String = {"counter": "block_counter", "stove": "block_stove", "ktable": "block_ktable", "innkeeper": "block_bar"}.get(o.type, "")
+	if block != "" and sprite(block) != null:
+		if o.type == "innkeeper" and c.distance_to(o.pos) < 30.0:
+			d_sprite("innkeeper", o.pos + Vector2(0, -26), 16.0)  # stands on a stool behind the bar
+		d_sprite(block, c)
+		return
 	match o.type:
 		"counter":
 			cuboid(c, s, 30.0, Color(0.42, 0.42, 0.42))
@@ -1362,6 +1433,16 @@ func draw_chunk(o: Dictionary, c: Vector2, s: Vector2) -> void:
 
 func draw_obj(o: Dictionary) -> void:
 	var p: Vector2 = o.pos
+	var sn: String = obj_sprite(o)
+	if sn != "" and sprite(sn) != null:
+		if o.type == "grub":
+			d_poly(ellipse_pts(iso(p), 18.0, 9.0), Color(0, 0, 0, 0.35))
+		d_sprite(sn, p)
+		if o.type == "barrel" and o.state == "kicked":
+			d_line(iso(p + Vector2(30, 24), 0.0), iso(p + Vector2(34, -24), 60.0), Color(0.6, 0.88, 1.0), 4.0)
+		if o.type == "table" and o.state == "gift":
+			d_sprite("item_gift", p, 26.0)
+		return
 	match o.type:
 		"pot":
 			if o.state == "full":
@@ -1407,6 +1488,9 @@ func draw_floor_item(fi: Dictionary) -> void:
 	var col: Color = Color(1, 0.85, 0.2) if it.kind == "coin" else Color(0.9, 0.9, 1.0)
 	if it.kind == "knowledge":
 		col = Color(0.7, 1.0, 0.8)
+	d_poly(ellipse_pts(iso(fi.pos), 9.0, 4.5), Color(0, 0, 0, 0.3))
+	if d_sprite(item_sprite(it), fi.pos):
+		return
 	cuboid(fi.pos, Vector2(14, 14), 8.0, col)
 
 
