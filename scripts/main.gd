@@ -7,7 +7,8 @@ enum Phase { DAWN, PASSAGE, SHIFT, INSPECTION, DREAM, ENDING }
 
 const ROOM := Rect2(20, 60, 840, 640)
 const PANEL_X := 885.0
-const SHIFT_ACTIONS := 8
+## Chores cost actions. Story actions (talking, notes, gifts, fragment hunting) are free.
+const SHIFT_ACTIONS := 12
 const MAX_LOOPS := 10
 const FRAGMENTS_NEEDED := 3
 const PELL_SPEED := 230.0
@@ -73,6 +74,9 @@ var cv: CanvasItem
 var shapes_on: bool = true
 var text_on: bool = true
 var ui_overlay: Node2D
+var dialogue: Array = []   # blocking story boxes: {who, text}
+var toast_text: String = ""
+var toast_time: float = 0.0
 const PIXEL_SIZE := 4.0
 
 
@@ -82,6 +86,8 @@ func _ready() -> void:
 	setup_pixel_layers()
 	reset_world()
 	say("I wake up. Again. This time I remember yesterday.")
+	story("Pell", "I woke up and I remember yesterday. Nobody else does. Not the Innkeeper. Not Grub. Not him.")
+	story("Pell", "So. The Hero kicks the door, smashes the pots, and I put them back. That's the job. For now.")
 
 
 # =========================================================== setup
@@ -264,6 +270,24 @@ func add_fact(id: String, text: String) -> void:
 	journal[id] = {"text": text, "loop": loop_no}
 	learned_this_loop.append(text)
 	say("Journal: " + text)
+	toast_text = "Journal updated: " + text
+	toast_time = 5.0
+
+
+func story(who: String, text: String) -> void:
+	## Plot-moving line: logged in the side panel AND shown in a big on-screen box that pauses play.
+	dialogue.append({"who": who, "text": text})
+	say(who + ": " + text)
+
+
+func awareness_story() -> void:
+	match awareness_state():
+		"Curious":
+			story("Pell", "The Hero glanced at me. Just for a second. Nobody looks at the cleaner. Careful.")
+		"Suspicious":
+			story("Hero", "Hey. Weren't you here yesterday? ...Weird. I keep seeing you.")
+		"Engaged":
+			story("Hero", "Wait. I know you. Who are you?")
 
 
 func witness(id: String, text: String) -> void:
@@ -275,7 +299,8 @@ func gain_fragment(source: String, fact_id: String, text: String) -> void:
 	found[source] = true
 	fragments += 1
 	add_fact(fact_id, text)
-	say("MEMORY FRAGMENT! Memory Depth is now %d." % memory_depth())
+	story("MEMORY FRAGMENT", text)
+	story("Pell", "Memory Depth %d. I remember more than I did this morning. That should worry me." % memory_depth())
 
 
 func lean_up(k: String, n: int) -> void:
@@ -342,7 +367,7 @@ func end_passage() -> void:
 	if hero.awareness >= 60.0:
 		actions -= 1
 		say("The Hero is suspicious of you. You feel eyes on your back.")
-	actions = maxi(4, actions)
+	actions = maxi(6, actions)
 	orders = {}
 	for id in objs:
 		var o: Dictionary = objs[id]
@@ -458,8 +483,11 @@ func finish_dream() -> void:
 	if fragments >= FRAGMENTS_NEEDED or loop_no >= MAX_LOOPS:
 		phase = Phase.ENDING
 		return
+	var old_tier: int = tier()
 	loop_no += 1
 	reset_world()
+	if tier() != old_tier:
+		story("Pell", "The Hero's moved on to Act %d: %s. The leftovers will be better. So will the monsters." % [tier(), ACT_NAMES[tier() - 1]])
 	phase = Phase.DAWN
 	msgs = []
 	say("Dawn. Loop %d. The inn smells of last night's stew." % loop_no)
@@ -541,7 +569,10 @@ func update_hero(dt: float) -> void:
 			hero_i += 1
 	# Being near the Hero in plain sight raises Awareness.
 	if not in_cart and hero_room == cur_room and pell.distance_to(hero_pos) < 110.0:
+		var before: String = awareness_state()
 		hero.awareness = minf(100.0, hero.awareness + 14.0 * dt)
+		if awareness_state() != before:
+			awareness_story()
 
 
 func hero_do(a: String, o: Dictionary) -> void:
@@ -652,14 +683,14 @@ func labels(t: Dictionary) -> Array:
 			return ["Repair door (1 action)", ""] if o.state == "broken" else ["", ""]
 		"grub":
 			if o.state == "out":
-				return ["Drag Grub back to spawn (1 action)", "Talk to groggy Grub (1 action)"]
+				return ["Drag Grub back to spawn (1 action)", "Talk to groggy Grub (story, free)"]
 			return ["", ""]
 		"board":
-			return ["Pin standard quest (1 action)", "Write your own note (1 action)"]
+			return ["Pin standard quest (1 action)", "Write your own note (story, free)"]
 		"table":
-			return ["Leave a gift for the Hero (1 action)", ""] if o.state == "empty" else ["", ""]
+			return ["Leave a gift for the Hero (story, free)", ""] if o.state == "empty" else ["", ""]
 		"barrel":
-			return ["Search behind barrel (1 action)", ""] if o.state == "kicked" else ["", ""]
+			return ["Search behind barrel (story, free)", ""] if o.state == "kicked" else ["", ""]
 		"seam":
 			return ["Open the Seam (stash)", ""]
 	return ["", ""]
@@ -744,8 +775,7 @@ func do_interact(t: Dictionary, alt: bool) -> void:
 					lean_up("compassion", 2)
 					say("Grub dragged home. He doesn't remember a thing. Probably.")
 			else:
-				if spend(1):
-					talk_to_grub()
+				talk_to_grub()
 		"board":
 			if not alt:
 				if spend(1):
@@ -762,7 +792,7 @@ func do_interact(t: Dictionary, alt: bool) -> void:
 					break
 			if idx2 < 0:
 				say("I have nothing to give. (Gifts: bread, flowers, chocolate - the Hero's own leftovers, polished.)")
-			elif spend(1):
+			else:
 				var g: Dictionary = satchel[idx2]
 				satchel.remove_at(idx2)
 				o.state = "gift"
@@ -772,8 +802,7 @@ func do_interact(t: Dictionary, alt: bool) -> void:
 			if found.has("barrel"):
 				say("Nothing more behind the barrel.")
 			elif journal.has("hero_barrel"):
-				if spend(1):
-					gain_fragment("barrel", "frag_barrel", "Behind the barrel: scratched into the wall, in my own handwriting - 'Don't trust the Founder.'")
+				gain_fragment("barrel", "frag_barrel", "Behind the barrel, scratched into the wall in my own handwriting: 'Don't trust the Founder.'")
 			else:
 				say("A dusty crack. If only I knew why he keeps kicking this thing...")
 		"seam":
@@ -784,11 +813,12 @@ func talk_to_grub() -> void:
 	lean_up("compassion", 4)
 	if not journal.has("grub_memory"):
 		add_fact("grub_memory", "Grub: 'Every morning I wake up, and every morning I forget a bad dream.' Revived monsters keep a trace of memory.")
-		say("Grub mumbles something odd. He looks sad. Come back and ask again.")
+		story("Grub", "...every morning I wake up on the same spot. And every morning someone tired drags me home.")
+		story("Pell", "He remembers something. Guild charms leave a trace. I should ask again tomorrow, once he's had time to think.")
 	elif journal[("grub_memory")].loop < loop_no and not found.has("grub"):
 		gain_fragment("grub", "frag_grub", "Grub: 'A mad old woman, Wenna, used to count the resets on the wall. Like you.'")
 	else:
-		say("Grub snores softly.")
+		story("Grub", "Zzz... five more minutes...")
 
 
 func use_item(i: int) -> void:
@@ -818,6 +848,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if k == KEY_F1:
 		show_debug = not show_debug
+		return
+	if not dialogue.is_empty():
+		if k == KEY_ENTER or k == KEY_KP_ENTER or k == KEY_E or k == KEY_SPACE or k == KEY_F:
+			dialogue.pop_front()
 		return
 	if show_journal:
 		if k == KEY_ESCAPE:
@@ -894,9 +928,6 @@ func handle_note_key(k: int) -> void:
 		return
 	var b: Dictionary = objs["board"]
 	if k == KEY_1 or k == KEY_2:
-		if not spend(1):
-			menu = ""
-			return
 		if k == KEY_1:
 			b.state = "kind"
 			lean_up("compassion", 6)
@@ -942,7 +973,7 @@ func check_doorways() -> void:
 
 func _process(delta: float) -> void:
 	if phase == Phase.PASSAGE or phase == Phase.SHIFT or phase == Phase.DAWN:
-		if menu == "" and not show_journal and not in_cart:
+		if menu == "" and not show_journal and not in_cart and dialogue.is_empty():
 			var v: Vector2 = Vector2.ZERO
 			if Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_UP):
 				v.y -= 1
@@ -955,11 +986,13 @@ func _process(delta: float) -> void:
 			if phase != Phase.DAWN:
 				move_pell(v.normalized() * PELL_SPEED * delta)
 				check_doorways()
-	if phase == Phase.PASSAGE and menu == "" and not show_journal:
+	if phase == Phase.PASSAGE and menu == "" and not show_journal and dialogue.is_empty():
 		var hdt: float = delta * (3.0 if Input.is_physical_key_pressed(KEY_SPACE) else 1.0)
 		update_hero(hdt)
 	if bark_time > 0.0:
 		bark_time -= delta
+	if toast_time > 0.0:
+		toast_time -= delta
 	queue_redraw()
 	if ui_overlay != null:
 		ui_overlay.queue_redraw()
@@ -1035,6 +1068,30 @@ func draw_overlay(c: CanvasItem) -> void:
 		draw_note_menu()
 	if show_journal:
 		draw_journal()
+	draw_toast()
+	draw_dialogue()
+
+
+func draw_toast() -> void:
+	if toast_time <= 0.0 or not dialogue.is_empty():
+		return
+	var w: float = 820.0
+	box(Rect2(Vector2(30, 98), Vector2(w, 46)), Color(0.05, 0.1, 0.16, 0.9), Color(0.6, 0.85, 1.0))
+	para(Vector2(42, 118), toast_text, w - 24.0, 13, Color(0.8, 0.93, 1.0))
+
+
+func draw_dialogue() -> void:
+	if dialogue.is_empty():
+		return
+	var d: Dictionary = dialogue[0]
+	var r: Rect2 = Rect2(60, 500, 760, 170)
+	var frag: bool = d.who == "MEMORY FRAGMENT"
+	box(Rect2(0, 0, 872, 720), Color(0, 0, 0, 0.35))
+	box(r, Color(0.07, 0.06, 0.1, 0.97), Color(0.6, 0.85, 1.0) if frag else Color(0.95, 0.85, 0.5))
+	txt(r.position + Vector2(20, 32), String(d.who), 20, Color(0.6, 0.85, 1.0) if frag else Color(0.95, 0.85, 0.5))
+	para(r.position + Vector2(20, 66), String(d.text), 720.0, 18)
+	var more: String = "  (%d more)" % (dialogue.size() - 1) if dialogue.size() > 1 else ""
+	txt(r.position + Vector2(20, 158), "[Enter] continue" + more, 13, Color(0.6, 0.6, 0.65))
 
 
 func draw_world() -> void:
@@ -1257,7 +1314,7 @@ func draw_dawn() -> void:
 	]
 	for l in lines:
 		para(Vector2(r.position.x + 24, y), String(l), 550.0, 15)
-		y += 26.0
+		y += 24.0 if String(l).length() < 62 else 42.0
 
 
 func draw_stash() -> void:
@@ -1288,7 +1345,7 @@ func draw_note_menu() -> void:
 	txt(Vector2(r.position.x + 24, y), "[1] 'Please be gentle with the pots. They have feelings.'   (Compassion)", 15, Color(0.6, 0.9, 0.6))
 	y += 30.0
 	txt(Vector2(r.position.x + 24, y), "[2] 'URGENT: wolf in the forest. Go now.'   (Control)", 15, Color(0.9, 0.7, 0.5))
-	txt(Vector2(r.position.x + 24, r.end.y - 20), "[Esc] cancel   (costs 1 action; replaces the standard notice)", 13, Color(0.6, 0.6, 0.65))
+	txt(Vector2(r.position.x + 24, r.end.y - 20), "[Esc] cancel   (free; counts as your pinned notice)", 13, Color(0.6, 0.6, 0.65))
 
 
 func draw_journal() -> void:
