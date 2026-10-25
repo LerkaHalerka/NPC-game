@@ -1086,7 +1086,9 @@ func _process(delta: float) -> void:
 			if Input.is_physical_key_pressed(KEY_D) or Input.is_physical_key_pressed(KEY_RIGHT):
 				v.x += 1
 			if phase != Phase.DAWN:
-				move_pell(v.normalized() * PELL_SPEED * delta)
+				# keys are screen-relative in the isometric view: W = up-screen = (-1,-1) in room space
+				var wd: Vector2 = Vector2(v.x + v.y, v.y - v.x)
+				move_pell(wd.normalized() * PELL_SPEED * delta)
 				check_doorways()
 	if phase == Phase.PASSAGE and menu == "" and not show_journal and dialogue.is_empty():
 		var hdt: float = delta * (3.0 if Input.is_physical_key_pressed(KEY_SPACE) else 1.0)
@@ -1198,43 +1200,288 @@ func draw_dialogue() -> void:
 	txt(r.position + Vector2(20, 158), "[Enter] continue" + more, 13, Color(0.6, 0.6, 0.65))
 
 
+# =========================================================== isometric drawing
+## Gameplay (movement, collision, reach) stays in flat room coordinates.
+## Only drawing projects them to a 2:1 isometric view.
+
+const ISO_A := 0.56
+const ISO_B := 0.28
+const ISO_ORIGIN := Vector2(388.0, 140.0)  # screen position of the room's north corner
+const WALL_H := 90.0
+
+
+func iso(p: Vector2, h: float = 0.0) -> Vector2:
+	var q: Vector2 = p - ROOM.position
+	return ISO_ORIGIN + Vector2((q.x - q.y) * ISO_A, (q.x + q.y) * ISO_B - h)
+
+
+func shade(c: Color, f: float) -> Color:
+	return Color(c.r * f, c.g * f, c.b * f, c.a)
+
+
+func d_poly(pts: Array, c: Color) -> void:
+	if shapes_on:
+		cv.draw_colored_polygon(PackedVector2Array(pts), c)
+
+
+func ellipse_pts(c: Vector2, rx: float, ry: float) -> Array:
+	var pts: Array = []
+	for i in 16:
+		var a: float = TAU * float(i) / 16.0
+		pts.append(c + Vector2(cos(a) * rx, sin(a) * ry))
+	return pts
+
+
+func cuboid(center: Vector2, size: Vector2, h: float, top: Color, z0: float = 0.0, outline: bool = true) -> void:
+	var x0: float = center.x - size.x / 2.0
+	var x1: float = center.x + size.x / 2.0
+	var y0: float = center.y - size.y / 2.0
+	var y1: float = center.y + size.y / 2.0
+	d_poly([iso(Vector2(x0, y1), h), iso(Vector2(x1, y1), h), iso(Vector2(x1, y1), z0), iso(Vector2(x0, y1), z0)], shade(top, 0.74))
+	d_poly([iso(Vector2(x1, y1), h), iso(Vector2(x1, y0), h), iso(Vector2(x1, y0), z0), iso(Vector2(x1, y1), z0)], shade(top, 0.52))
+	var tp: Array = [iso(Vector2(x0, y0), h), iso(Vector2(x1, y0), h), iso(Vector2(x1, y1), h), iso(Vector2(x0, y1), h)]
+	d_poly(tp, top)
+	if outline and shapes_on:
+		tp.append(tp[0])
+		cv.draw_polyline(PackedVector2Array(tp), shade(top, 0.35), 1.0)
+
+
+func cylinder(center: Vector2, r: float, h: float, top: Color) -> void:
+	var c0: Vector2 = iso(center)
+	var rx: float = r * ISO_A * 1.414
+	var ry: float = r * ISO_B * 1.414
+	var side: Color = shade(top, 0.65)
+	d_poly(ellipse_pts(c0, rx, ry), side)
+	d_poly([c0 + Vector2(-rx, 0), c0 + Vector2(rx, 0), c0 + Vector2(rx, -h), c0 + Vector2(-rx, -h)], side)
+	d_poly(ellipse_pts(c0 + Vector2(0, -h), rx, ry), top)
+
+
+func person(p: Vector2, body: Color, r: float, tall: float) -> void:
+	var c: Vector2 = iso(p)
+	d_poly(ellipse_pts(c, r * 1.5, r * 0.75), Color(0, 0, 0, 0.35))
+	d_circle(c + Vector2(0, -tall * 0.45), r, body)
+	d_circle(c + Vector2(0, -tall), r * 0.7, Color(0.98, 0.85, 0.7))
+
+
 func draw_world() -> void:
 	var inn: bool = cur_room == "inn"
-	box(ROOM, Color(0.36, 0.27, 0.19) if inn else Color(0.42, 0.42, 0.45), Color(0.15, 0.1, 0.07))
-	for i in range(1, 8):
-		d_line(Vector2(ROOM.position.x, ROOM.position.y + i * 80), Vector2(ROOM.end.x, ROOM.position.y + i * 80), Color(0.3, 0.22, 0.15) if inn else Color(0.33, 0.33, 0.36), 1.0)
-	txt(Vector2(30, 82), "THE SLEEPING STAG - INN" if inn else "INN KITCHEN", 13, Color(0.7, 0.6, 0.45))
-	if inn:
-		d_circle(GRUB_SPAWN, 26.0, Color(0.3, 0.22, 0.15))
-		txt(GRUB_SPAWN + Vector2(-22, 44), "(spawn)", 11, Color(0.55, 0.45, 0.35))
-		box(Rect2(ROOM.end.x - 8, 380, 10, 80), Color(0.2, 0.3, 0.2))
-		txt(Vector2(ROOM.end.x - 52, 475), "to Forest", 11, Color(0.55, 0.7, 0.5))
-		box(Rect2(DOORWAY_X - 45, ROOM.end.y - 6, 90, 8), Color(0.2, 0.3, 0.2))
-		txt(Vector2(DOORWAY_X - 32, ROOM.end.y - 12), "Kitchen v", 11, Color(0.6, 0.8, 0.55))
-	else:
-		box(Rect2(DOORWAY_X - 45, ROOM.position.y - 2, 90, 8), Color(0.2, 0.3, 0.2))
-		txt(Vector2(DOORWAY_X - 22, ROOM.position.y + 20), "Inn ^", 11, Color(0.6, 0.8, 0.55))
+	var floor_col: Color = Color(0.46, 0.32, 0.2) if inn else Color(0.5, 0.5, 0.5)
+	var wall_col: Color = Color(0.6, 0.45, 0.32) if inn else Color(0.66, 0.66, 0.66)
+	draw_room_shell(floor_col, wall_col, inn)
+	var items: Array = []
 	for id in objs:
-		if objs[id].room == cur_room:
-			draw_obj(objs[id])
+		var o: Dictionary = objs[id]
+		if o.room != cur_room or o.type == "door":
+			continue
+		if o.type in ["counter", "stove", "ktable", "innkeeper"]:
+			# long furniture is drawn in chunks so people can walk in front of / behind it
+			var long_x: bool = o.size.x >= o.size.y
+			var n: int = maxi(1, ceili((o.size.x if long_x else o.size.y) / 56.0))
+			for k in n:
+				var f: float = (float(k) + 0.5) / float(n) - 0.5
+				var cc: Vector2 = o.pos + (Vector2(o.size.x * f, 0) if long_x else Vector2(0, o.size.y * f))
+				var cs: Vector2 = Vector2(o.size.x / float(n), o.size.y) if long_x else Vector2(o.size.x, o.size.y / float(n))
+				items.append({"d": cc.x + cc.y + (cs.x + cs.y) * 0.5, "k": "chunk", "o": o, "c": cc, "s": cs})
+		else:
+			items.append({"d": o.pos.x + o.pos.y + (o.size.x + o.size.y) * 0.5, "k": "obj", "o": o})
 	for fi in floor_items:
 		if fi.room == cur_room:
-			draw_floor_item(fi)
+			items.append({"d": fi.pos.x + fi.pos.y, "k": "floor", "f": fi})
 	if phase == Phase.PASSAGE and hero_room == cur_room:
-		d_circle(hero_pos, 17.0, Color(0.95, 0.8, 0.2))
-		d_circle(hero_pos + Vector2(0, -22), 9.0, Color(0.98, 0.88, 0.7))
-		txt(hero_pos + Vector2(-16, 36), "HERO", 11, Color(1, 0.9, 0.4))
+		items.append({"d": hero_pos.x + hero_pos.y + 2.0, "k": "hero"})
 	if not in_cart:
-		d_circle(pell, 13.0, Color(0.3, 0.55, 0.85))
-		d_line(pell + Vector2(10, 12), pell + Vector2(26, -14), Color(0.8, 0.65, 0.3), 3.0)
-		txt(pell + Vector2(-9, 30), "Pell", 11, Color(0.6, 0.8, 1))
+		items.append({"d": pell.x + pell.y + 2.0, "k": "pell"})
+	items.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.d < b.d)
+	for it in items:
+		match it.k:
+			"obj":
+				draw_obj(it.o)
+			"chunk":
+				draw_chunk(it.o, it.c, it.s)
+			"floor":
+				draw_floor_item(it.f)
+			"hero":
+				person(hero_pos, Color(0.95, 0.8, 0.2), 12.0, 40.0)
+			"pell":
+				person(pell, Color(0.3, 0.55, 0.85), 10.0, 32.0)
+				d_line(iso(pell) + Vector2(8, -12), iso(pell) + Vector2(20, -38), Color(0.8, 0.65, 0.3), 3.0)
+	draw_marker()
+	draw_labels()
+
+
+func draw_room_shell(floor_col: Color, wall_col: Color, inn: bool) -> void:
+	var r0: Vector2 = ROOM.position
+	var W: float = ROOM.size.x
+	var Hh: float = ROOM.size.y
+	d_poly([iso(r0), iso(r0 + Vector2(W, 0)), iso(r0 + Vector2(W, 0), WALL_H), iso(r0, WALL_H)], shade(wall_col, 0.86))
+	d_poly([iso(r0), iso(r0 + Vector2(0, Hh)), iso(r0 + Vector2(0, Hh), WALL_H), iso(r0, WALL_H)], shade(wall_col, 0.62))
+	d_line(iso(r0, WALL_H), iso(r0 + Vector2(W, 0), WALL_H), shade(wall_col, 1.1), 3.0)
+	d_line(iso(r0, WALL_H), iso(r0 + Vector2(0, Hh), WALL_H), shade(wall_col, 0.8), 3.0)
+	for i in 11:
+		for j in 8:
+			var x0: float = float(i) * 80.0
+			var y0: float = float(j) * 80.0
+			var x1: float = minf(x0 + 80.0, W)
+			var y1: float = minf(y0 + 80.0, Hh)
+			var col: Color = floor_col if (i + j) % 2 == 0 else shade(floor_col, 0.9)
+			d_poly([iso(r0 + Vector2(x0, y0)), iso(r0 + Vector2(x1, y0)), iso(r0 + Vector2(x1, y1)), iso(r0 + Vector2(x0, y1))], col)
+	var edge: Color = Color(0.1, 0.07, 0.05)
+	d_line(iso(r0 + Vector2(W, 0)), iso(r0 + Vector2(W, Hh)), edge, 3.0)
+	d_line(iso(r0 + Vector2(0, Hh)), iso(r0 + Vector2(W, Hh)), edge, 3.0)
+	if inn:
+		var d: Dictionary = objs.get("door", {})
+		if not d.is_empty():
+			var ok: bool = d.state == "ok"
+			var dy0: float = d.pos.y - 40.0
+			var dy1: float = d.pos.y + 40.0
+			d_poly([iso(Vector2(r0.x, dy0)), iso(Vector2(r0.x, dy1)), iso(Vector2(r0.x, dy1), 66.0), iso(Vector2(r0.x, dy0), 66.0)], Color(0.5, 0.33, 0.16) if ok else Color(0.22, 0.13, 0.09))
+			if not ok:
+				d_line(iso(Vector2(r0.x, dy0 + 10), 60.0), iso(Vector2(r0.x, dy1 - 14), 14.0), Color(0.05, 0.03, 0.02), 2.0)
+		d_poly(ellipse_pts(iso(GRUB_SPAWN), 40.0, 20.0), shade(floor_col, 0.7))
+		d_poly([iso(Vector2(ROOM.end.x - 14, 380)), iso(Vector2(ROOM.end.x, 380)), iso(Vector2(ROOM.end.x, 460)), iso(Vector2(ROOM.end.x - 14, 460))], Color(0.25, 0.45, 0.25))
+		d_poly([iso(Vector2(DOORWAY_X - 45, ROOM.end.y - 14)), iso(Vector2(DOORWAY_X + 45, ROOM.end.y - 14)), iso(Vector2(DOORWAY_X + 45, ROOM.end.y)), iso(Vector2(DOORWAY_X - 45, ROOM.end.y))], Color(0.25, 0.45, 0.25))
+		d_line(iso(Vector2(390, 684)), iso(Vector2(510, 684)), Color(0.3, 0.55, 0.8), 6.0)
+		d_line(iso(Vector2(390, 684)), iso(Vector2(510, 684)), Color(0.75, 0.93, 1.0), 2.0)
+	else:
+		d_poly([iso(Vector2(DOORWAY_X - 45, r0.y)), iso(Vector2(DOORWAY_X + 45, r0.y)), iso(Vector2(DOORWAY_X + 45, r0.y), 66.0), iso(Vector2(DOORWAY_X - 45, r0.y), 66.0)], Color(0.22, 0.4, 0.22))
+
+
+func draw_chunk(o: Dictionary, c: Vector2, s: Vector2) -> void:
+	match o.type:
+		"counter":
+			cuboid(c, s, 30.0, Color(0.42, 0.42, 0.42))
+		"stove":
+			cuboid(c, s, 56.0, Color(0.3, 0.3, 0.3))
+		"ktable":
+			cuboid(c, s, 26.0, Color(0.5, 0.4, 0.3))
+		"innkeeper":
+			cuboid(c, s, 30.0, Color(0.42, 0.26, 0.14))
+			if c.distance_to(o.pos) < 30.0:
+				person(o.pos + Vector2(0, -34), Color(0.7, 0.3, 0.3), 10.0, 36.0)
+
+
+func draw_obj(o: Dictionary) -> void:
+	var p: Vector2 = o.pos
+	match o.type:
+		"pot":
+			if o.state == "full":
+				cylinder(p, 17.0, 30.0, Color(0.68, 0.42, 0.26))
+			else:
+				cylinder(p, 17.0, 7.0, Color(0.3, 0.2, 0.14))
+				d_line(iso(p + Vector2(-12, 12), 2.0), iso(p + Vector2(14, -10), 8.0), Color(0.5, 0.3, 0.2), 3.0)
+		"chest":
+			var open: bool = o.state == "open"
+			if open:
+				cuboid(p, o.size, 16.0, Color(0.2, 0.13, 0.08))
+				cuboid(p + Vector2(0, -22), Vector2(o.size.x, 6.0), 36.0, Color(0.45, 0.3, 0.14), 10.0)
+			else:
+				cuboid(p, o.size, 22.0, Color(0.55, 0.38, 0.17))
+				d_line(iso(p + Vector2(0, -o.size.y / 2.0), 22.0), iso(p + Vector2(0, o.size.y / 2.0), 22.0), Color(0.85, 0.7, 0.25), 3.0)
+		"grub":
+			var c: Vector2 = iso(p)
+			d_poly(ellipse_pts(c, 20.0, 10.0), Color(0, 0, 0, 0.35))
+			var gc: Color = Color(0.4, 0.72, 0.3) if o.state == "ok" else Color(0.3, 0.45, 0.25)
+			d_circle(c + Vector2(0, -12), 14.0, gc)
+			d_circle(c + Vector2(-5, -15), 2.0, Color(0.05, 0.1, 0.02))
+			d_circle(c + Vector2(5, -15), 2.0, Color(0.05, 0.1, 0.02))
+		"board":
+			cuboid(p, o.size, 66.0, Color(0.52, 0.38, 0.22), 14.0)
+			cuboid(p + Vector2(0, 0), Vector2(6.0, 8.0), 14.0, Color(0.35, 0.25, 0.15))
+			if o.state != "empty":
+				d_poly([iso(p + Vector2(8, -12), 52.0), iso(p + Vector2(8, 12), 52.0), iso(p + Vector2(8, 12), 30.0), iso(p + Vector2(8, -12), 30.0)], Color(0.96, 0.93, 0.8))
+		"barrel":
+			cylinder(p, 18.0, 42.0, Color(0.5, 0.33, 0.16))
+			if o.state == "kicked":
+				d_line(iso(p + Vector2(30, 24), 0.0), iso(p + Vector2(34, -24), 60.0), Color(0.6, 0.88, 1.0), 4.0)
+		"table":
+			cuboid(p, o.size, 26.0, Color(0.52, 0.36, 0.2))
+			if o.state == "gift":
+				cuboid(p, Vector2(18.0, 18.0), 12.0, Color(0.85, 0.3, 0.4), 26.0)
+		"cart":
+			cuboid(p, o.size, 22.0, Color(0.4, 0.46, 0.52))
+			cuboid(p, o.size - Vector2(10, 8), 10.0, Color(0.22, 0.25, 0.3), 14.0, false)
+
+
+func draw_floor_item(fi: Dictionary) -> void:
+	var it: Dictionary = fi.item
+	var col: Color = Color(1, 0.85, 0.2) if it.kind == "coin" else Color(0.9, 0.9, 1.0)
+	if it.kind == "knowledge":
+		col = Color(0.7, 1.0, 0.8)
+	cuboid(fi.pos, Vector2(14, 14), 8.0, col)
+
+
+func draw_marker() -> void:
+	## Bobbing arrow over the thing the E / F prompt refers to.
+	if not (phase == Phase.SHIFT or phase == Phase.PASSAGE):
+		return
+	for t in reach_list():
+		var lb: Array = labels(t)
+		if lb[0] == "" and lb[1] == "":
+			continue
+		var pos: Vector2 = t.ref.pos
+		var top: float = 70.0 if t.kind == "obj" else 24.0
+		var bob: float = sin(float(Time.get_ticks_msec()) / 160.0) * 3.0
+		var a: Vector2 = iso(pos, top + 14.0) + Vector2(0, bob)
+		d_poly([a + Vector2(-8, -10), a + Vector2(8, -10), a], Color(1, 0.92, 0.3))
+		return
+
+
+func draw_labels() -> void:
+	for id in objs:
+		var o: Dictionary = objs[id]
+		if o.room != cur_room:
+			continue
+		var p: Vector2 = o.pos
+		match o.type:
+			"pot":
+				if o.state == "broken" and phase == Phase.SHIFT:
+					txt(iso(p, 20.0) + Vector2(-20, 0), "broken", 11, Color(0.95, 0.5, 0.4))
+			"chest":
+				if o.state == "open" and o.item != null:
+					txt(iso(p, 52.0) + Vector2(-40, 0), String(o.item.name), 11, Color(1, 0.9, 0.5))
+				if o.gap:
+					txt(iso(p, 40.0) + Vector2(-16, 0), "GAP!", 12, Color(1, 0.4, 0.4))
+			"door":
+				if o.state == "broken":
+					txt(iso(Vector2(ROOM.position.x, p.y), 76.0) + Vector2(-14, 0), "broken", 11, Color(0.95, 0.5, 0.4))
+			"grub":
+				txt(iso(p, 34.0) + Vector2(-18, 0), "Grub" + (" (out cold)" if o.state == "out" else ""), 11, Color(0.7, 0.95, 0.6))
+			"board":
+				txt(iso(p, 84.0) + Vector2(-24, 0), "NOTICES", 10, Color(0.9, 0.8, 0.55))
+			"barrel":
+				if o.state == "kicked":
+					txt(iso(p, 70.0) + Vector2(-14, 0), "crack", 11, Color(0.6, 0.88, 1.0))
+			"table":
+				txt(iso(p, 40.0) + Vector2(-26, 0), "gift table" if o.state == "empty" else "gift!", 11, Color(0.95, 0.85, 0.65))
+			"cart":
+				txt(iso(p, 30.0) + Vector2(-14, 0), "CART", 11, Color(0.85, 0.9, 0.95))
+			"innkeeper":
+				txt(iso(p + Vector2(0, -34), 58.0) + Vector2(-44, 0), "INNKEEPER'S BAR", 11, Color(1, 0.88, 0.6))
+			"counter", "stove", "ktable":
+				txt(iso(p, 56.0 if o.type == "stove" else 40.0) + Vector2(-24, 0), String(o.type).to_upper(), 10, Color(0.85, 0.85, 0.9))
+	for fi in floor_items:
+		if fi.room == cur_room and pell.distance_to(fi.pos) < 120.0:
+			txt(iso(fi.pos, 22.0) + Vector2(-30, 0), String(fi.item.name), 11, Color(1, 1, 1))
+	if cur_room == "inn":
+		txt(iso(Vector2(450, 684), 4.0) + Vector2(-26, 22), "THE SEAM", 11, Color(0.7, 0.92, 1.0))
+		txt(iso(Vector2(DOORWAY_X, ROOM.end.y), 0.0) + Vector2(-26, 18), "Kitchen v", 11, Color(0.7, 0.9, 0.6))
+		txt(iso(Vector2(ROOM.end.x, 420), 0.0) + Vector2(-14, 24), "to Forest", 11, Color(0.6, 0.8, 0.55))
+		txt(iso(ROOM.position, 0.0) + Vector2(20, 0), "THE SLEEPING STAG - INN", 13, Color(0.85, 0.75, 0.6))
+	else:
+		txt(iso(Vector2(DOORWAY_X, ROOM.position.y), 74.0) + Vector2(-14, 0), "Inn ^", 11, Color(0.7, 0.9, 0.6))
+		txt(iso(ROOM.position, 0.0) + Vector2(20, 0), "INN KITCHEN", 13, Color(0.85, 0.8, 0.7))
+	if phase == Phase.PASSAGE and hero_room == cur_room:
+		txt(iso(hero_pos, 44.0) + Vector2(-16, 14), "HERO", 11, Color(1, 0.9, 0.4))
+	if not in_cart:
+		txt(iso(pell, 0.0) + Vector2(-9, 20), "Pell", 11, Color(0.6, 0.8, 1))
 
 
 func draw_world_hud() -> void:
 	## Crisp (non-pixelated) bits that sit on top of the world.
 	if phase == Phase.PASSAGE and hero_room == cur_room and bark_time > 0.0:
-		box(Rect2(hero_pos + Vector2(-8, -78), Vector2(font.get_string_size(bark_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x + 14, 24)), Color(1, 1, 1, 0.92))
-		txt(hero_pos + Vector2(-1, -61), bark_text, 13, Color(0.1, 0.1, 0.1))
+		var bp: Vector2 = iso(hero_pos, 66.0)
+		box(Rect2(bp + Vector2(-8, -24), Vector2(font.get_string_size(bark_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x + 14, 24)), Color(1, 1, 1, 0.92))
+		txt(bp + Vector2(-1, -7), bark_text, 13, Color(0.1, 0.1, 0.1))
 	if phase == Phase.SHIFT or phase == Phase.PASSAGE:
 		var list: Array = reach_list()
 		for t in list:
@@ -1252,76 +1499,6 @@ func draw_world_hud() -> void:
 		box(Rect2(Vector2(240, 66), Vector2(470, 24)), Color(0, 0, 0, 0.6))
 		var where: String = "" if hero_room == cur_room else "  (Hero is in the %s)" % hero_room
 		txt(Vector2(248, 84), "HERO'S PASSAGE - watch, hide. [Space] fast-forward" + where, 13)
-
-
-func draw_obj(o: Dictionary) -> void:
-	var p: Vector2 = o.pos
-	match o.type:
-		"pot":
-			if o.state == "full":
-				d_circle(p, 18.0, Color(0.65, 0.4, 0.25))
-				d_circle(p + Vector2(0, -12), 10.0, Color(0.5, 0.3, 0.2))
-			else:
-				d_circle(p, 18.0, Color(0.25, 0.17, 0.12), false, 2.0)
-				txt(p + Vector2(-14, 4), "x_x", 12, Color(0.7, 0.4, 0.3))
-				if phase == Phase.SHIFT:
-					txt(p + Vector2(-20, -24), "broken", 11, Color(0.9, 0.5, 0.4))
-		"chest":
-			var open: bool = o.state == "open"
-			box(Rect2(p - Vector2(28, 18), Vector2(56, 36)), Color(0.5, 0.35, 0.15) if not open else Color(0.35, 0.25, 0.12), Color(0.2, 0.12, 0.05))
-			if open:
-				txt(p + Vector2(-26, -24), "open", 11, Color(0.9, 0.8, 0.5))
-				if o.item != null:
-					txt(p + Vector2(-34, 38), String(o.item.name), 11, Color(1, 0.9, 0.5))
-			elif phase != Phase.SHIFT:
-				txt(p + Vector2(-8, 5), "[]", 12)
-			if o.gap:
-				txt(p + Vector2(-20, 38), "GAP!", 12, Color(1, 0.4, 0.4))
-		"door":
-			box(Rect2(p - Vector2(8, 40), Vector2(16, 80)), Color(0.45, 0.3, 0.15) if o.state == "ok" else Color(0.25, 0.15, 0.1), Color(0.1, 0.06, 0.03))
-			if o.state == "broken":
-				txt(p + Vector2(-8, 58), "broken", 11, Color(0.9, 0.5, 0.4))
-		"grub":
-			var gc: Color = Color(0.4, 0.7, 0.3) if o.state == "ok" else Color(0.3, 0.45, 0.25)
-			d_circle(p, 16.0, gc)
-			txt(p + Vector2(-12, 5), "ò_ó" if o.state == "ok" else "x_x", 12, Color(0.1, 0.2, 0.05))
-			txt(p + Vector2(-14, -22), "Grub" + (" (out cold)" if o.state == "out" else ""), 11, Color(0.7, 0.9, 0.6))
-		"board":
-			box(Rect2(p - Vector2(20, 40), Vector2(40, 80)), Color(0.5, 0.38, 0.22), Color(0.2, 0.13, 0.07))
-			txt(p + Vector2(-17, -46), "NOTICES", 10, Color(0.8, 0.7, 0.5))
-			if o.state != "empty":
-				box(Rect2(p - Vector2(12, 20), Vector2(24, 30)), Color(0.95, 0.92, 0.8))
-		"barrel":
-			box(Rect2(p - Vector2(20, 26), Vector2(40, 52)), Color(0.45, 0.3, 0.15), Color(0.15, 0.1, 0.05))
-			if o.state == "kicked":
-				d_line(p + Vector2(34, -30), p + Vector2(30, 30), Color(0.6, 0.85, 1.0), 3.0)
-				txt(p + Vector2(-30, 44), "crack", 11, Color(0.6, 0.85, 1.0))
-		"table":
-			box(Rect2(p - Vector2(34, 22), Vector2(68, 44)), Color(0.5, 0.35, 0.2), Color(0.2, 0.12, 0.05))
-			txt(p + Vector2(-26, 5), "gift table" if o.state == "empty" else "gift!", 11, Color(0.9, 0.8, 0.6))
-		"seam":
-			d_line(p + Vector2(-60, 0), p + Vector2(60, 0), Color(0.6, 0.85, 1.0), 2.0)
-			txt(p + Vector2(-26, -8), "THE SEAM", 11, Color(0.6, 0.85, 1.0))
-		"innkeeper":
-			box(Rect2(p - o.size / 2.0, o.size), Color(0.35, 0.22, 0.12), Color(0.15, 0.08, 0.04))
-			d_circle(p + Vector2(0, -34), 12.0, Color(0.9, 0.75, 0.6))
-			txt(p + Vector2(-60, 5), "BAR - INNKEEPER", 11, Color(0.95, 0.85, 0.6))
-		"counter", "stove", "ktable":
-			box(Rect2(p - o.size / 2.0, o.size), Color(0.3, 0.3, 0.34), Color(0.12, 0.12, 0.14))
-			txt(p + Vector2(-24, 4), String(o.type).to_upper(), 11, Color(0.75, 0.75, 0.8))
-		"cart":
-			box(Rect2(p - Vector2(30, 18), Vector2(60, 36)), Color(0.35, 0.4, 0.45), Color(0.15, 0.17, 0.2))
-			txt(p + Vector2(-24, 5), "CART" if not in_cart else "(you)", 11, Color(0.8, 0.85, 0.9))
-
-
-func draw_floor_item(fi: Dictionary) -> void:
-	var it: Dictionary = fi.item
-	var col: Color = Color(1, 0.85, 0.2) if it.kind == "coin" else Color(0.9, 0.9, 1.0)
-	if it.kind == "knowledge":
-		col = Color(0.7, 1.0, 0.8)
-	d_rect(Rect2(fi.pos - Vector2(7, 7), Vector2(14, 14)), col, true)
-	if pell.distance_to(fi.pos) < 120.0:
-		txt(fi.pos + Vector2(-30, -12), String(it.name), 11, Color(1, 1, 1))
 
 
 func draw_panel() -> void:

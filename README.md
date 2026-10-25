@@ -32,6 +32,7 @@ Everything is drawn in code (`scripts/main.gd`), no assets needed.
 - Coin and the cheating Guild: wages arrive only at the end of the shift (itemised payslip: rent, broom rental, laundering, "misc. adjustment"), so at Memory Depth 1 coin is worthless after the reset. From Depth 2 you keep coin for one cycle (spend it or lose it) and the Journal/Pell expose how little the Guild actually pays. The Innkeeper's bar sells tea (+2 actions), bread (gift) and fakes; prices rise with the Hero's act while pay stays flat.
 - Solid furniture: pots, chests, barrel, tables, cart and Grub block movement.
 - Pixel-art look: the world is rendered through a pixelation shader (block size `PIXEL_SIZE` in `main.gd`, use a divisor of 1280 like 2, 4 or 5); text and UI stay crisp on a layer above.
+- Isometric 2:1 view: gameplay and collision stay in flat room coordinates; only drawing is projected (see the `iso()` helper). WASD is screen-relative (W = up-screen). Depth sorting is by position, and long furniture is drawn in chunks.
 - Two rooms (Inn + Kitchen) joined by the doorway at the south wall of the Inn; the Hero visits both, so you can only watch one room at a time.
 
 ## Not in the demo (see the GDD)
