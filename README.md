@@ -29,6 +29,7 @@ Everything is drawn in code (`scripts/main.gd`), no assets needed.
 - Hidden Leanings (Control / Defiance / Compassion / Charm) rise from what you do and pick the ending text; second leaning is the "blend".
 - Hero drives (greed / mercy) shift from your notes and gifts and change his behaviour.
 - Guild Suspicion and Hero Awareness meters with their consequences.
+- Coin and the cheating Guild: wages arrive only at the end of the shift (itemised payslip: rent, broom rental, laundering, "misc. adjustment"), so at Memory Depth 1 coin is worthless after the reset. From Depth 2 you keep coin for one cycle (spend it or lose it) and the Journal/Pell expose how little the Guild actually pays. The Innkeeper's bar sells tea (+2 actions), bread (gift) and fakes; prices rise with the Hero's act while pay stays flat.
 - Solid furniture: pots, chests, barrel, tables, cart and Grub block movement.
 - Pixel-art look: the world is rendered through a pixelation shader (block size `PIXEL_SIZE` in `main.gd`, use a divisor of 1280 like 2, 4 or 5); text and UI stay crisp on a layer above.
 - Two rooms (Inn + Kitchen) joined by the doorway at the south wall of the Inn; the Hero visits both, so you can only watch one room at a time.

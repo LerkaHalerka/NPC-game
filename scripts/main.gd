@@ -45,7 +45,10 @@ var suspicion: int = 20
 var objs: Dictionary = {}
 var floor_items: Array = []
 var satchel: Array = []
-var coin: int = 0
+var coin: int = 0            # earned this loop
+var carried_coin: int = 0    # kept from last loop (Memory Depth 2+), expires at the next reset
+var shop_greeted: bool = false
+var payslips: int = 0
 var actions: int = 0
 var orders: Dictionary = {}
 var pell: Vector2 = Vector2.ZERO
@@ -179,6 +182,7 @@ func reset_world() -> void:
 	orders = {}
 	satchel = []
 	coin = 0
+	shop_greeted = false
 	bribed = false
 	learned_this_loop = []
 	in_cart = false
@@ -201,6 +205,7 @@ func reset_world() -> void:
 	add_obj("table", "table", Vector2(430, 340), "empty")
 	add_obj("seam", "seam", Vector2(450, 684), "ok")
 	add_obj("cart", "cart", Vector2(400, 520), "ok")
+	add_obj("innkeeper", "innkeeper", Vector2(640, 250), "ok", "inn", Vector2(150, 48))
 	# Kitchen
 	add_obj("kpot0", "pot", Vector2(200, 130), "full", "kitchen")
 	add_obj("kpot1", "pot", Vector2(330, 130), "full", "kitchen")
@@ -210,6 +215,29 @@ func reset_world() -> void:
 	add_obj("counter", "counter", Vector2(520, 220), "ok", "kitchen", Vector2(280, 36))
 	add_obj("stove", "stove", Vector2(790, 130), "ok", "kitchen", Vector2(90, 70))
 	add_obj("ktable", "ktable", Vector2(480, 440), "ok", "kitchen", Vector2(170, 90))
+
+
+func total_coin() -> int:
+	return coin + carried_coin
+
+
+func spend_coin(n: int) -> bool:
+	if total_coin() < n:
+		return false
+	var from_old: int = mini(carried_coin, n)  # old coin goes first - it expires sooner
+	carried_coin -= from_old
+	coin -= n - from_old
+	return true
+
+
+func shop_stock() -> Array:
+	## Prices follow the Hero's act. Your wage doesn't.
+	var m: float = 1.0 + 0.25 * (tier() - 1)
+	return [
+		{"id": "tea", "name": "Strong Tea (+2 actions)", "price": int(round(8.0 * m))},
+		{"id": "bread", "name": "Fresh Bread (gift for the Hero)", "price": int(round(5.0 * m))},
+		{"id": "fake", "name": "Convincing Fake (swap for loot)", "price": int(round(7.0 * m))},
+	]
 
 
 func stash_power() -> int:
@@ -418,9 +446,25 @@ func end_shift() -> void:
 	if gaps > 0:
 		delta += 15 * gaps
 		report.append("Bramm frowns at an empty chest.  Suspicion +%d" % (15 * gaps))
-	var wage: int = int(round(dil * 30.0))
-	coin += wage
-	report.append("Wage: %d coin. (Coin is lost on reset - spend it, or it's gone.)" % wage)
+	payslips += 1
+	var gross: int = int(round(dil * 40.0))
+	var adj: int = randi_range(2, 6)
+	var cuts: Array = [["Dormitory rent", 8], ["Broom rental", 4], ["Uniform laundering", 3], ["Misc. adjustment", adj]]
+	var net: int = gross
+	report.append("PAYSLIP   Gross pay: %d coin" % gross)
+	for c in cuts:
+		net -= int(c[1])
+		report.append("   - %s: %d" % [c[0], c[1]])
+	net = maxi(0, net)
+	coin += net
+	report.append("   Net pay: %d coin" % net)
+	if memory_depth() >= 2:
+		report.append("   You remember the contract: 40 coin per full shift. Received: %d%%." % int(100.0 * net / 40.0))
+		if not journal.has("guild_cheat"):
+			add_fact("guild_cheat", "The Guild's payslip: rent, rental, laundering and a 'misc. adjustment' that is never the same twice. I'm paid less than the Hero spends on one potion.")
+			story("Pell", "Rent. Broom rental. Laundering. 'Misc.' ...I do the maths. They take most of it back, every cycle. And I only noticed because I remember.")
+	else:
+		report.append("   (Wages arrive at the end of the shift. Coin does not survive the reset.)")
 	suspicion = clampi(suspicion + delta, 0, 100)
 	if suspicion >= 80:
 		report.append("RAID! Inquisitors search the Seam.")
@@ -438,10 +482,9 @@ func end_shift() -> void:
 func bribe() -> void:
 	if bribed:
 		return
-	if coin < 20:
+	if not spend_coin(20):
 		say("Not enough coin.")
 		return
-	coin -= 20
 	bribed = true
 	suspicion = maxi(0, suspicion - 15)
 	lean_up("control", 5)
@@ -456,12 +499,17 @@ func begin_dream() -> void:
 	var lost: Array = []
 	for it in satchel:
 		lost.append(it.name)
-	if coin > 0:
+	if memory_depth() >= 2:
+		if carried_coin > 0:
+			lost.append("%d coin that you failed to spend in time" % carried_coin)
+	elif coin > 0:
 		lost.append("%d coin" % coin)
 	if lost.is_empty():
 		dream_lines.append("Nothing on your person to lose.")
 	else:
 		dream_lines.append("Lost in the reset: " + ", ".join(lost))
+	if memory_depth() >= 2 and coin > 0:
+		dream_lines.append("Carried into the next cycle: %d coin (spend it before the next reset or it vanishes)." % coin)
 	if stash.is_empty():
 		dream_lines.append("Your stash is empty. Hint: whatever is in the Seam survives.")
 	else:
@@ -484,6 +532,14 @@ func finish_dream() -> void:
 		phase = Phase.ENDING
 		return
 	var old_tier: int = tier()
+	if memory_depth() >= 2:
+		if carried_coin == 0 and coin > 0 and not journal.has("coin_kept"):
+			add_fact("coin_kept", "With enough memory, a few coins stay in my pocket for one cycle. The Guild's wages were never meant to be kept.")
+			story("Pell", "My pocket still jingles. One cycle's worth. The Guild never told me coins could survive this. Nobody ever tried to keep any.")
+		carried_coin = coin
+	else:
+		carried_coin = 0
+	coin = 0
 	loop_no += 1
 	reset_world()
 	if tier() != old_tier:
@@ -693,6 +749,8 @@ func labels(t: Dictionary) -> Array:
 			return ["Search behind barrel (story, free)", ""] if o.state == "kicked" else ["", ""]
 		"seam":
 			return ["Open the Seam (stash)", ""]
+		"innkeeper":
+			return ["Talk to the Innkeeper / buy things (free)", ""]
 	return ["", ""]
 
 
@@ -807,6 +865,13 @@ func do_interact(t: Dictionary, alt: bool) -> void:
 				say("A dusty crack. If only I knew why he keeps kicking this thing...")
 		"seam":
 			menu = "stash"
+		"innkeeper":
+			menu = "shop"
+			if not shop_greeted:
+				shop_greeted = true
+				story("Innkeeper", "Welcome to the Sleeping Stag! First time here, love? Prices are posted. They never change. (They do.)")
+				if memory_depth() >= 2:
+					story("Pell", "I've bought tea from her two hundred times. She has never once remembered my face. Her prices climb with every act of the Hero's quest. My pay doesn't.")
 
 
 func talk_to_grub() -> void:
@@ -862,6 +927,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if menu == "note":
 		handle_note_key(k)
+		return
+	if menu == "shop":
+		handle_shop_key(k)
 		return
 	var enter: bool = (k == KEY_ENTER or k == KEY_KP_ENTER)
 	match phase:
@@ -920,6 +988,31 @@ func handle_stash_key(k: int) -> void:
 			stash.remove_at(j)
 			satchel.append(it2)
 			say("Took %s out of the Seam." % it2.name)
+
+
+func handle_shop_key(k: int) -> void:
+	if k == KEY_ESCAPE or k == KEY_ENTER:
+		menu = ""
+		return
+	if k < KEY_1 or k > KEY_3:
+		return
+	var item: Dictionary = shop_stock()[k - KEY_1]
+	if total_coin() < int(item.price):
+		say("Not enough coin for the %s." % item.name)
+		return
+	match item.id:
+		"tea":
+			spend_coin(int(item.price))
+			actions += 2
+			say("You gulp down the tea. +2 actions.")
+		"bread":
+			if add_to_satchel({"name": "Fresh Bread", "kind": "gift", "power": 2, "guild": false}):
+				spend_coin(int(item.price))
+				say("Bought bread. The Hero can't resist it.")
+		"fake":
+			if add_to_satchel({"name": "Convincing Fake", "kind": "junk", "power": 0, "guild": false}):
+				spend_coin(int(item.price))
+				say("Bought a convincing fake. Now a chest can look untouched.")
 
 
 func handle_note_key(k: int) -> void:
@@ -1066,6 +1159,8 @@ func draw_overlay(c: CanvasItem) -> void:
 		draw_stash()
 	elif menu == "note":
 		draw_note_menu()
+	elif menu == "shop":
+		draw_shop()
 	if show_journal:
 		draw_journal()
 	draw_toast()
@@ -1198,6 +1293,10 @@ func draw_obj(o: Dictionary) -> void:
 		"seam":
 			d_line(p + Vector2(-60, 0), p + Vector2(60, 0), Color(0.6, 0.85, 1.0), 2.0)
 			txt(p + Vector2(-26, -8), "THE SEAM", 11, Color(0.6, 0.85, 1.0))
+		"innkeeper":
+			box(Rect2(p - o.size / 2.0, o.size), Color(0.35, 0.22, 0.12), Color(0.15, 0.08, 0.04))
+			d_circle(p + Vector2(0, -34), 12.0, Color(0.9, 0.75, 0.6))
+			txt(p + Vector2(-60, 5), "BAR - INNKEEPER", 11, Color(0.95, 0.85, 0.6))
 		"counter", "stove", "ktable":
 			box(Rect2(p - o.size / 2.0, o.size), Color(0.3, 0.3, 0.34), Color(0.12, 0.12, 0.14))
 			txt(p + Vector2(-24, 4), String(o.type).to_upper(), 11, Color(0.75, 0.75, 0.8))
@@ -1227,7 +1326,10 @@ func draw_panel() -> void:
 	y += 22.0
 	txt(Vector2(x, y), "Memory Depth %d   Fragments %d/%d" % [memory_depth(), fragments, FRAGMENTS_NEEDED], 14, Color(0.6, 0.85, 1.0))
 	y += 22.0
-	txt(Vector2(x, y), "Actions left: %d     Coin: %d" % [actions, coin], 14)
+	var coin_txt: String = "Coin: %d" % total_coin()
+	if carried_coin > 0:
+		coin_txt += " (%d carried, expire)" % carried_coin
+	txt(Vector2(x, y), "Actions left: %d    %s" % [actions, coin_txt], 14)
 	y += 24.0
 	txt(Vector2(x, y), "Guild Suspicion: %d (%s)" % [suspicion, suspicion_state()], 13)
 	y += 6.0
@@ -1334,6 +1436,21 @@ func draw_stash() -> void:
 		y += 22.0
 	y += 14.0
 	txt(Vector2(r.position.x + 24, y), "Gear in the Seam makes your satchel bigger (+1 slot per 6 power).", 13, Color(0.75, 0.75, 0.8))
+	txt(Vector2(r.position.x + 24, r.end.y - 20), "[Esc] close", 13, Color(0.6, 0.6, 0.65))
+
+
+func draw_shop() -> void:
+	var r: Rect2 = overlay("THE SLEEPING STAG - BAR")
+	var y: float = r.position.y + 90.0
+	txt(Vector2(r.position.x + 24, y), "Your coin: %d%s" % [total_coin(), ("  (%d carried - spend first, they expire)" % carried_coin) if carried_coin > 0 else ""], 15, Color(1, 0.9, 0.4))
+	y += 36.0
+	var stock: Array = shop_stock()
+	for i in stock.size():
+		var col: Color = Color(0.93, 0.9, 0.82) if total_coin() >= int(stock[i].price) else Color(0.5, 0.5, 0.55)
+		txt(Vector2(r.position.x + 24, y), "[%d] %s - %d coin" % [i + 1, stock[i].name, stock[i].price], 16, col)
+		y += 32.0
+	y += 20.0
+	para(Vector2(r.position.x + 24, y), "Prices rise with the Hero's act. Your wage does not.", 550.0, 13, Color(0.75, 0.75, 0.8))
 	txt(Vector2(r.position.x + 24, r.end.y - 20), "[Esc] close", 13, Color(0.6, 0.6, 0.65))
 
 
