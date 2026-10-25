@@ -18,7 +18,7 @@ Everything is drawn in code (`scripts/main.gd`), no assets needed.
 ## The loop (one Cycle)
 1. **Dawn** – plan.
 2. **Hero's passage** – a scripted Hero smashes pots, kicks doors and the corner barrel, empties one chest, skips the other, clobbers Grub, and dumps old gear. Stay close enough to *witness* things (that is how Journal facts are learned), far enough not to raise his Awareness, or hide in the cart.
-3. **Shift** – fixed action budget (12; story actions like talking, notes and gifts are free) vs. more work orders than actions. Restock pots/chests, repair the door, return Grub, pin a notice. Loot is free but risky: taking a chest's item leaves a *gap* unless you swap in a Scrap of Cloth.
+3. **Shift** – action budget equal to the number of work orders (story actions like talking, notes, gifts and reading the letter each cost 1 too, so plot choices mean skipping a chore; Strong Tea gives +2) vs. more work orders than actions. Restock pots/chests, repair the door, return Grub, pin a notice. Loot is free but risky: taking a chest's item leaves a *gap* unless you swap in a Scrap of Cloth.
 4. **Inspection** – Supervisor Bramm scores Diligence, changes Suspicion (raid at 80+ confiscates the stash). Bribe him with coin.
 5. **Rebirth** – everything resets except Journal, Memory Depth, Leanings, Hero state and the **stash in the Seam**. Items on you and coin are lost.
 

@@ -7,8 +7,10 @@ enum Phase { DAWN, PASSAGE, SHIFT, INSPECTION, DREAM, ENDING }
 
 const ROOM := Rect2(20, 60, 840, 640)
 const PANEL_X := 885.0
-## Chores cost actions. Story actions (talking, notes, gifts, fragment hunting) are free.
-const SHIFT_ACTIONS := 12
+## Actions per shift = number of work orders (never fewer than MIN_ACTIONS).
+## Chores AND story actions (talking, notes, gifts, fragment hunting) each cost 1,
+## so every plot decision means a chore left undone - unless you buy Strong Tea.
+const MIN_ACTIONS := 4
 const MAX_LOOPS := 10
 const FRAGMENTS_NEEDED := 3
 const PELL_SPEED := 230.0
@@ -388,14 +390,6 @@ func end_passage() -> void:
 	hero_pos = Vector2(-100, -100)
 	hero_room = "inn"
 	in_cart = false
-	actions = SHIFT_ACTIONS
-	if suspicion >= 40:
-		actions -= 2
-		say("Watched: a Supervisor shadows you. Fewer actions this shift.")
-	if hero.awareness >= 60.0:
-		actions -= 1
-		say("The Hero is suspicious of you. You feel eyes on your back.")
-	actions = maxi(6, actions)
 	orders = {}
 	for id in objs:
 		var o: Dictionary = objs[id]
@@ -414,7 +408,15 @@ func end_passage() -> void:
 					orders[id] = {"label": "Return Grub to spawn", "done": false}
 			"board":
 				orders[id] = {"label": "Pin tomorrow's quest", "done": false}
-	say("Shift begins. %d work orders, %d actions. Something has to give." % [orders.size(), actions])
+	actions = maxi(MIN_ACTIONS, orders.size())
+	if suspicion >= 40:
+		actions -= 2
+		say("Watched: a Supervisor shadows you. Two fewer actions this shift.")
+	if hero.awareness >= 60.0:
+		actions -= 1
+		say("The Hero is suspicious of you. You feel eyes on your back. One fewer action.")
+	actions = maxi(3, actions)
+	say("Shift begins: %d work orders, %d actions. Plot choices cost an action too. Strong Tea (+2) at the bar." % [orders.size(), actions])
 
 
 func end_shift() -> void:
@@ -739,14 +741,14 @@ func labels(t: Dictionary) -> Array:
 			return ["Repair door (1 action)", ""] if o.state == "broken" else ["", ""]
 		"grub":
 			if o.state == "out":
-				return ["Drag Grub back to spawn (1 action)", "Talk to groggy Grub (story, free)"]
+				return ["Drag Grub back to spawn (1 action)", "Talk to groggy Grub (story, 1 action)"]
 			return ["", ""]
 		"board":
-			return ["Pin standard quest (1 action)", "Write your own note (story, free)"]
+			return ["Pin standard quest (1 action)", "Write your own note (story, 1 action)"]
 		"table":
-			return ["Leave a gift for the Hero (story, free)", ""] if o.state == "empty" else ["", ""]
+			return ["Leave a gift for the Hero (story, 1 action)", ""] if o.state == "empty" else ["", ""]
 		"barrel":
-			return ["Search behind barrel (story, free)", ""] if o.state == "kicked" else ["", ""]
+			return ["Search behind barrel (story, 1 action)", ""] if o.state == "kicked" else ["", ""]
 		"seam":
 			return ["Open the Seam (stash)", ""]
 		"innkeeper":
@@ -833,7 +835,8 @@ func do_interact(t: Dictionary, alt: bool) -> void:
 					lean_up("compassion", 2)
 					say("Grub dragged home. He doesn't remember a thing. Probably.")
 			else:
-				talk_to_grub()
+				if spend(1):
+					talk_to_grub()
 		"board":
 			if not alt:
 				if spend(1):
@@ -850,7 +853,7 @@ func do_interact(t: Dictionary, alt: bool) -> void:
 					break
 			if idx2 < 0:
 				say("I have nothing to give. (Gifts: bread, flowers, chocolate - the Hero's own leftovers, polished.)")
-			else:
+			elif spend(1):
 				var g: Dictionary = satchel[idx2]
 				satchel.remove_at(idx2)
 				o.state = "gift"
@@ -860,7 +863,8 @@ func do_interact(t: Dictionary, alt: bool) -> void:
 			if found.has("barrel"):
 				say("Nothing more behind the barrel.")
 			elif journal.has("hero_barrel"):
-				gain_fragment("barrel", "frag_barrel", "Behind the barrel, scratched into the wall in my own handwriting: 'Don't trust the Founder.'")
+				if spend(1):
+					gain_fragment("barrel", "frag_barrel", "Behind the barrel, scratched into the wall in my own handwriting: 'Don't trust the Founder.'")
 			else:
 				say("A dusty crack. If only I knew why he keeps kicking this thing...")
 		"seam":
@@ -892,6 +896,8 @@ func use_item(i: int) -> void:
 	var it: Dictionary = satchel[i]
 	match it.kind:
 		"knowledge":
+			if not spend(1):
+				return
 			satchel.remove_at(i)
 			gain_fragment("letter", "frag_letter", "The Hero's letter: 'Dear Hero, the Cycle was never your fault. Find the one who sweeps.'")
 		"consumable":
@@ -1021,6 +1027,9 @@ func handle_note_key(k: int) -> void:
 		return
 	var b: Dictionary = objs["board"]
 	if k == KEY_1 or k == KEY_2:
+		if not spend(1):
+			menu = ""
+			return
 		if k == KEY_1:
 			b.state = "kind"
 			lean_up("compassion", 6)
@@ -1462,7 +1471,7 @@ func draw_note_menu() -> void:
 	txt(Vector2(r.position.x + 24, y), "[1] 'Please be gentle with the pots. They have feelings.'   (Compassion)", 15, Color(0.6, 0.9, 0.6))
 	y += 30.0
 	txt(Vector2(r.position.x + 24, y), "[2] 'URGENT: wolf in the forest. Go now.'   (Control)", 15, Color(0.9, 0.7, 0.5))
-	txt(Vector2(r.position.x + 24, r.end.y - 20), "[Esc] cancel   (free; counts as your pinned notice)", 13, Color(0.6, 0.6, 0.65))
+	txt(Vector2(r.position.x + 24, r.end.y - 20), "[Esc] cancel   (1 action; counts as your pinned notice)", 13, Color(0.6, 0.6, 0.65))
 
 
 func draw_journal() -> void:
