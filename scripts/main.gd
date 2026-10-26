@@ -69,6 +69,8 @@ var learned_this_loop: Array = []
 var report: Array = []
 var dream_lines: Array = []
 var bribed: bool = false
+var backlog: Dictionary = {}   # id -> true: work left undone, persists across resets until actually done
+var mess_noticed: bool = false
 
 # ---- UI state ----
 var menu: String = ""
@@ -222,6 +224,33 @@ func reset_world() -> void:
 	add_obj("counter", "counter", Vector2(520, 220), "ok", "kitchen", Vector2(280, 36))
 	add_obj("stove", "stove", Vector2(790, 130), "ok", "kitchen", Vector2(56, 56))
 	add_obj("ktable", "ktable", Vector2(480, 440), "ok", "kitchen", Vector2(168, 84))
+	apply_backlog()
+
+
+func apply_backlog() -> void:
+	## Unfinished work does not reset with the world: it stays undone until Pell does it.
+	for id in backlog.keys():
+		if not objs.has(id):
+			continue
+		var o: Dictionary = objs[id]
+		match o.type:
+			"pot":
+				o.state = "broken"
+			"chest":
+				o.state = "open"
+			"door":
+				o.state = "broken"
+			"grub":
+				o.state = "out"
+				o.pos = o.spawn + Vector2(-70, -70)
+
+
+func backlog_names() -> Array:
+	var out: Array = []
+	for id in backlog:
+		if objs.has(id):
+			out.append({"pot": "broken pot", "chest": "open chest", "door": "broken door", "grub": "Grub out cold"}.get(objs[id].type, "a mess"))
+	return out
 
 
 func total_coin() -> int:
@@ -357,6 +386,7 @@ func spend(n: int) -> bool:
 func complete_order(id: String) -> void:
 	if orders.has(id):
 		orders[id].done = true
+	backlog.erase(id)
 
 
 func add_to_satchel(item: Dictionary) -> bool:
@@ -388,6 +418,14 @@ func begin_passage() -> void:
 	hero_t = 0.0
 	hero_started = false
 	say("The Hero is coming. Stay close enough to learn, far enough not to be seen.")
+	if not backlog.is_empty():
+		# A mess that never gets cleaned makes the Hero wonder - without him knowing why.
+		hero.awareness = minf(100.0, hero.awareness + 5.0 * backlog.size())
+		bark("Huh. That's still broken? Didn't I do that yesterday?")
+		if not mess_noticed:
+			mess_noticed = true
+			add_fact("mess_stays", "Work left undone stays undone. The Hero noticed a mess that never got cleaned. It made him curious.")
+			story("Pell", "I left it. Nobody tidied it. And he noticed - a clean room is invisible, a mess that stays makes a person think.")
 
 
 func end_passage() -> void:
@@ -413,6 +451,9 @@ func end_passage() -> void:
 					orders[id] = {"label": "Return Grub to spawn", "done": false}
 			"board":
 				orders[id] = {"label": "Pin tomorrow's quest", "done": false}
+	for oid in orders:
+		if backlog.has(oid):
+			orders[oid].label = "OVERDUE: " + orders[oid].label
 	actions = maxi(MIN_ACTIONS, orders.size())
 	if suspicion >= 40:
 		actions -= 2
@@ -437,9 +478,14 @@ func end_shift() -> void:
 	for id in objs:
 		if objs[id].type == "chest" and objs[id].gap:
 			gaps += 1
+	for oid in orders:
+		if not orders[oid].done and objs[oid].type != "board":
+			backlog[oid] = true
 	report = []
 	report.append("Supervisor Bramm inspects your areas.")
 	report.append("Work orders done: %d / %d  (Diligence %d%%)" % [done, total, int(dil * 100.0)])
+	if not backlog.is_empty():
+		report.append("%d unfinished task(s) stay undone until someone does them." % backlog.size())
 	var delta: int = 0
 	if dil < 0.5:
 		delta += 25
@@ -522,6 +568,8 @@ func begin_dream() -> void:
 	else:
 		var kept: Array = stash.map(func(it: Dictionary) -> String: return it.name)
 		dream_lines.append("Kept in the Seam: " + ", ".join(kept))
+	if not backlog.is_empty():
+		dream_lines.append("Still undone next cycle: " + ", ".join(backlog_names()))
 	dream_lines.append("")
 	if learned_this_loop.is_empty():
 		dream_lines.append("No new memories settle this time.")
@@ -662,6 +710,9 @@ func hero_do(a: String, o: Dictionary) -> void:
 				bark("A new quest! Obviously I'll do it.")
 			witness("hero_board", "The Hero always reads the notice board, and does what it says.")
 		"pot":
+			if o.state == "broken":
+				bark("Already smashed. ...Wasn't that yesterday?")
+				return
 			var chance: float = clampf(0.35 + (hero.greed - hero.mercy * 0.5) / 100.0, 0.15, 0.95)
 			if randf() < chance:
 				o.state = "broken"
@@ -696,6 +747,9 @@ func hero_do(a: String, o: Dictionary) -> void:
 			bark("Bag's full. I'll come back. (He never does.)")
 			witness("hero_chest_skip", "The Hero's bag is full by the second chest. He always leaves it unlooted.")
 		"grub":
+			if o.state == "out":
+				bark("Still down? Huh.")
+				return
 			if objs["board"].state == "kind" or randf() * 100.0 < hero.mercy:
 				bark("Sorry, little guy. Off you go.")
 			else:
