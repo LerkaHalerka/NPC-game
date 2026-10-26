@@ -493,16 +493,15 @@ func end_shift() -> void:
 	report.append("Work orders done: %d / %d  (Diligence %d%%)" % [done, total, int(dil * 100.0)])
 	if not backlog.is_empty():
 		report.append("%d unfinished task(s) stay undone until someone does them." % backlog.size())
+	# Suspicion moves in proportion to how much work is left, not in steps:
+	# 100% done = -8, 70% = no change, 0% = +30 (linear in between).
 	var delta: int = 0
-	if dil < 0.5:
-		delta += 25
-		report.append("Half the room is still a mess.  Suspicion +25")
-	elif dil < 0.8:
-		delta += 10
-		report.append("\"Could be tidier.\"  Suspicion +10")
+	if dil >= 0.7:
+		delta = -int(round((dil - 0.7) / 0.3 * 8.0))
 	else:
-		delta -= 8
-		report.append("\"Good work, Pell.\"  Suspicion -8")
+		delta = int(round((0.7 - dil) / 0.7 * 30.0))
+	var verdict: String = "Excellent." if dil >= 0.9 else ("Acceptable." if dil >= 0.7 else ("Sloppy." if dil >= 0.4 else "Disgraceful."))
+	report.append("Bramm: \"%s\"  Suspicion %s%d" % [verdict, "+" if delta >= 0 else "", delta])
 	if gaps > 0:
 		delta += 15 * gaps
 		report.append("Bramm frowns at an empty chest.  Suspicion +%d" % (15 * gaps))
