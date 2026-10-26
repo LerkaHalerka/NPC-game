@@ -2,16 +2,16 @@
 extends RefCounted
 
 const ANCHORS := {
-	"barrel": Vector2(18, 94),
-	"block_bar": Vector2(32, 78),
-	"block_counter": Vector2(28, 78),
-	"block_ktable": Vector2(42, 70),
-	"block_stove": Vector2(34, 156),
-	"board_empty": Vector2(24, 138),
-	"board_note": Vector2(24, 138),
-	"cart": Vector2(34, 86),
-	"chest_closed": Vector2(28, 60),
-	"chest_open": Vector2(28, 84),
+	"barrel": Vector2(18, 78),
+	"block_bar": Vector2(32, 62),
+	"block_counter": Vector2(28, 56),
+	"block_ktable": Vector2(42, 54),
+	"block_stove": Vector2(34, 124),
+	"board_empty": Vector2(24, 118),
+	"board_note": Vector2(24, 118),
+	"cart": Vector2(34, 74),
+	"chest_closed": Vector2(28, 48),
+	"chest_open": Vector2(28, 72),
 	"grub_ok": Vector2(12, 22),
 	"grub_out": Vector2(12, 22),
 	"hero": Vector2(14, 42),
@@ -27,5 +27,5 @@ const ANCHORS := {
 	"pell": Vector2(12, 42),
 	"pot_broken": Vector2(22, 20),
 	"pot_full": Vector2(16, 52),
-	"table": Vector2(34, 70),
+	"table": Vector2(34, 52),
 }
