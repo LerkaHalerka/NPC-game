@@ -83,6 +83,7 @@ var shapes_on: bool = true
 var text_on: bool = true
 var ui_overlay: Node2D
 var nav: AStarGrid2D
+var hero_wait: float = 0.0
 var dialogue: Array = []   # blocking story boxes: {who, text}
 var toast_text: String = ""
 var toast_time: float = 0.0
@@ -533,7 +534,11 @@ func end_shift() -> void:
 			stash = []
 		else:
 			report.append("They find nothing. Your stash was empty.")
-		suspicion = 40
+		if backlog.is_empty():
+			suspicion = 40
+			report.append("With the work all done, the Guild's suspicion cools to 40.")
+		else:
+			report.append("Work is still undone, so the Guild's suspicion does not cool.")
 	report.append("")
 	report.append("[B] Bribe Bramm (20 coin, Suspicion -15)     [Enter] Sleep")
 
@@ -643,9 +648,39 @@ func build_nav(room: String) -> void:
 					nav.set_point_solid(Vector2i(cx, cy), true)
 
 
-func hero_path(a: Vector2, b: Vector2, straight: bool) -> Array:
+func shove_pell() -> void:
+	## Out of patience, the Hero pushes Pell aside (he never walks through them).
+	var best: Vector2 = pell
+	var best_d: float = -1.0
+	for i in 12:
+		var cand: Vector2 = pell + Vector2.from_angle(TAU * float(i) / 12.0) * 52.0
+		if ROOM.grow(-14.0).has_point(cand) and not blocked(cand) and cand.distance_to(hero_pos) > best_d:
+			best = cand
+			best_d = cand.distance_to(hero_pos)
+	if best_d >= 0.0:
+		pell = best
+		say("The Hero shoves past you without a glance.")
+
+
+func hero_hits_pell(next: Vector2) -> bool:
+	## True if stepping to `next` would push the Hero into Pell (moving away is always fine).
+	if in_cart or hero_room != cur_room:
+		return false
+	var lim: float = HERO_R + PELL_R + 4.0
+	return next.distance_to(pell) < lim and next.distance_to(pell) < hero_pos.distance_to(pell)
+
+
+func hero_path(a: Vector2, b: Vector2, straight: bool, avoid_pell: bool = false) -> Array:
 	if straight or nav == null:
 		return [b]
+	var extra: Array = []
+	if avoid_pell and not in_cart and hero_room == cur_room:
+		for cx in range(maxi(0, int(pell.x / 20.0) - 3), mini(48, int(pell.x / 20.0) + 4)):
+			for cy in range(maxi(0, int(pell.y / 20.0) - 3), mini(36, int(pell.y / 20.0) + 4)):
+				var cid: Vector2i = Vector2i(cx, cy)
+				if not nav.is_point_solid(cid) and Vector2(cx * 20 + 10, cy * 20 + 10).distance_to(pell) < 36.0:
+					nav.set_point_solid(cid, true)
+					extra.append(cid)
 	var ia: Vector2i = Vector2i(clampi(int(a.x / 20.0), 0, 47), clampi(int(a.y / 20.0), 0, 35))
 	var ib: Vector2i = Vector2i(clampi(int(b.x / 20.0), 0, 47), clampi(int(b.y / 20.0), 0, 35))
 	var was_a: bool = nav.is_point_solid(ia)
@@ -655,6 +690,8 @@ func hero_path(a: Vector2, b: Vector2, straight: bool) -> Array:
 	var pts: PackedVector2Array = nav.get_point_path(ia, ib)
 	nav.set_point_solid(ia, was_a)
 	nav.set_point_solid(ib, was_b)
+	for cid in extra:
+		nav.set_point_solid(cid, false)
 	var out: Array = []
 	for i in range(1, pts.size()):
 		out.append(pts[i])
@@ -726,6 +763,20 @@ func update_hero(dt: float) -> void:
 		var tgt: Vector2 = path[st.pi]
 		var d: Vector2 = tgt - hero_pos
 		var stp: float = HERO_SPEED * dt
+		if hero_hits_pell(hero_pos + d.normalized() * minf(stp, d.length())):
+			# Pell is in the way: wait, then try another route, then lose patience.
+			hero_wait += dt
+			if hero_wait > 0.6 and not st.get("rerouted", false):
+				st["rerouted"] = true
+				st["path"] = hero_path(hero_pos, st.p, st.straight, true)
+				st["pi"] = 0
+			elif hero_wait > 3.5:
+				bark("Out of the way, cleaner!")
+				hero.awareness = minf(100.0, hero.awareness + 8.0)
+				shove_pell()
+				hero_wait = 0.0
+			return
+		hero_wait = 0.0
 		if d.length() <= stp:
 			hero_pos = tgt
 			st["pi"] = st.pi + 1
@@ -1164,7 +1215,9 @@ func handle_note_key(k: int) -> void:
 
 
 func blocked(p: Vector2) -> bool:
-	## Solid furniture, chests, pots etc. cannot be walked over.
+	## Solid furniture, chests, pots etc. - and the Hero - cannot be walked through.
+	if phase == Phase.PASSAGE and hero_room == cur_room and p.distance_to(hero_pos) < PELL_R + HERO_R:
+		return true
 	for id in objs:
 		var o: Dictionary = objs[id]
 		if o.room == cur_room and o.size.x > 0.0:
