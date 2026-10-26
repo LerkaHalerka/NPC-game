@@ -27,7 +27,6 @@ Everything is drawn in code (`scripts/main.gd`), no assets needed.
 - Knowledge as keys: the barrel fragment only opens if you *saw* the Hero kick it; Grub only talks on a later loop.
 - 3 Memory Fragments (barrel, Grub, the Hero's letter from loop 3+) → Memory Depth up (bigger stash) → ending.
 - Hidden Leanings (Control / Defiance / Compassion / Charm) rise from what you do and pick the ending text; second leaning is the "blend".
-- The Audition (rebirth dream, from the updated story bible): a dark stage with role cards (Hero, Villain, Mentor, Scenery). Pell starts under Scenery, flickers in loops 1-3, and drifts toward the part the story is considering as your hidden Leanings grow (Defiance → Villain, Compassion+Charm → Hero, Control → Mentor; the Mentor mapping is a guess).
 - Hero drives (greed / mercy) shift from your notes and gifts and change his behaviour.
 - Guild Suspicion and Hero Awareness meters with their consequences.
 - Coin and the cheating Guild: wages arrive only at the end of the shift (itemised payslip: rent, broom rental, laundering, "misc. adjustment"), so at Memory Depth 1 coin is worthless after the reset. From Depth 2 you keep coin for one cycle (spend it or lose it) and the Journal/Pell expose how little the Guild actually pays. The Innkeeper's bar sells tea (+2 actions), bread (gift) and fakes; prices rise with the Hero's act while pay stays flat.

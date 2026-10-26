@@ -69,7 +69,6 @@ var learned_this_loop: Array = []
 var report: Array = []
 var dream_lines: Array = []
 var bribed: bool = false
-var dream_page: int = 0
 
 # ---- UI state ----
 var menu: String = ""
@@ -501,7 +500,6 @@ func bribe() -> void:
 
 func begin_dream() -> void:
 	phase = Phase.DREAM
-	dream_page = 0
 	dream_lines = []
 	dream_lines.append("The world rewinds.")
 	dream_lines.append("")
@@ -532,7 +530,7 @@ func begin_dream() -> void:
 		for t in learned_this_loop:
 			dream_lines.append("  - " + t)
 	dream_lines.append("")
-	dream_lines.append("[Enter] Continue")
+	dream_lines.append("[Enter] Wake up")
 
 
 func finish_dream() -> void:
@@ -972,10 +970,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				bribe()
 		Phase.DREAM:
 			if enter:
-				if dream_page == 0:
-					dream_page = 1
-				else:
-					finish_dream()
+				finish_dream()
 		Phase.ENDING:
 			if enter:
 				get_tree().reload_current_scene()
@@ -1175,10 +1170,7 @@ func draw_overlay(c: CanvasItem) -> void:
 		Phase.INSPECTION:
 			draw_lines_screen("INSPECTION", report)
 		Phase.DREAM:
-			if dream_page == 0:
-				draw_lines_screen("REBIRTH", dream_lines)
-			else:
-				draw_audition()
+			draw_lines_screen("REBIRTH", dream_lines)
 		Phase.ENDING:
 			draw_ending()
 	if menu == "stash":
@@ -1732,59 +1724,6 @@ func draw_shop() -> void:
 	y += 20.0
 	para(Vector2(r.position.x + 24, y), "Prices rise with the Hero's act. Your wage does not.", 550.0, 13, Color(0.75, 0.75, 0.8))
 	txt(Vector2(r.position.x + 24, r.end.y - 20), "[Esc] close", 13, Color(0.6, 0.6, 0.65))
-
-
-func audition_pull() -> Array:
-	## The Audition: Pell starts under Scenery and drifts toward the part the story is considering.
-	## [card index (0 Hero, 1 Villain, 2 Mentor, 3 Scenery), strength 0..1]
-	var hero_pull: int = lean.compassion + lean.charm
-	var best: int = 3
-	var v: int = 0
-	if lean.defiance > v:
-		best = 1
-		v = lean.defiance
-	if hero_pull > v:
-		best = 0
-		v = hero_pull
-	if lean.control > v:
-		best = 2
-		v = lean.control
-	return [best, clampf(float(v) / 40.0, 0.0, 1.0)]
-
-
-func draw_audition() -> void:
-	var r: Rect2 = overlay("THE AUDITION")
-	var stage: Rect2 = Rect2(r.position + Vector2(20, 64), Vector2(560, 350))
-	box(stage, Color(0.03, 0.03, 0.05), Color(0.35, 0.3, 0.2))
-	var names: Array = ["HERO", "VILLAIN", "MENTOR", "SCENERY"]
-	var pull: Array = audition_pull()
-	var lit: int = pull[0] if pull[1] >= 0.9 else -1
-	var xs: Array = []
-	for i in 4:
-		xs.append(stage.position.x + 75.0 + float(i) * 137.0)
-		var cx: float = xs[i]
-		var card: Rect2 = Rect2(cx - 52.0, stage.position.y + 24.0, 104.0, 64.0)
-		box(card, Color(0.16, 0.14, 0.2), Color(1, 0.88, 0.4) if i == lit else Color(0.4, 0.36, 0.3))
-		txt(Vector2(cx - 38.0, card.position.y + 38.0), names[i], 15, Color(1, 0.9, 0.5) if i == lit else Color(0.75, 0.7, 0.6))
-		d_line(Vector2(cx, card.end.y), Vector2(cx, card.end.y + 30.0), Color(0.4, 0.36, 0.3), 1.0)
-	var sx: float = lerpf(float(xs[3]), float(xs[pull[0]]), float(pull[1]))
-	var floor_y: float = stage.end.y - 50.0
-	d_poly([Vector2(float(xs[3]) - 8.0, stage.position.y + 120.0), Vector2(float(xs[3]) + 8.0, stage.position.y + 120.0), Vector2(sx + 34.0, floor_y + 8.0), Vector2(sx - 34.0, floor_y + 8.0)], Color(1, 1, 0.9, 0.05))
-	var alpha: float = 0.95
-	if loop_no <= 3:
-		alpha = 0.25 + 0.7 * absf(sin(float(Time.get_ticks_msec()) / 140.0))  # the unexplained flicker
-	d_circle(Vector2(sx, floor_y - 44.0), 12.0, Color(0.0, 0.0, 0.0, alpha))
-	d_poly([Vector2(sx - 16.0, floor_y - 30.0), Vector2(sx + 16.0, floor_y - 30.0), Vector2(sx + 20.0, floor_y), Vector2(sx - 20.0, floor_y)], Color(0.0, 0.0, 0.0, alpha))
-	d_line(Vector2(sx - 30.0, floor_y + 4.0), Vector2(sx + 30.0, floor_y + 4.0), Color(0.3, 0.27, 0.2), 2.0)
-	var cap: String
-	if loop_no <= 3:
-		cap = "A silhouette under SCENERY. For one second it flickers. Nobody explains it."
-	elif pull[1] < 0.25:
-		cap = "Still under SCENERY. To the story, a cleaner is background."
-	else:
-		cap = "The silhouette has drifted toward %s." % names[pull[0]]
-	para(Vector2(r.position.x + 24, r.end.y - 52), cap, 550.0, 14, Color(0.8, 0.8, 0.85))
-	txt(Vector2(r.position.x + 24, r.end.y - 20), "[Enter] Wake up", 13, Color(0.6, 0.6, 0.65))
 
 
 func draw_note_menu() -> void:
