@@ -16,6 +16,7 @@ const FRAGMENTS_NEEDED := 3
 const PELL_SPEED := 230.0
 const HERO_SPEED := 170.0
 const REACH := 56.0
+const HERO_R := 14.0
 const PELL_R := 13.0
 const DOORWAY_X := 680.0
 const SIGHT := 300.0
@@ -81,6 +82,7 @@ var cv: CanvasItem
 var shapes_on: bool = true
 var text_on: bool = true
 var ui_overlay: Node2D
+var nav: AStarGrid2D
 var dialogue: Array = []   # blocking story boxes: {who, text}
 var toast_text: String = ""
 var toast_time: float = 0.0
@@ -178,6 +180,8 @@ func solid_size(type: String) -> Vector2:
 			return Vector2(60, 36)
 		"grub":
 			return Vector2(30, 30)
+		"innkeeper":
+			return Vector2(22, 22)
 	return Vector2.ZERO
 
 
@@ -214,7 +218,8 @@ func reset_world() -> void:
 	add_obj("table", "table", Vector2(430, 340), "empty")
 	add_obj("seam", "seam", Vector2(450, 684), "ok")
 	add_obj("cart", "cart", Vector2(400, 520), "ok")
-	add_obj("innkeeper", "innkeeper", Vector2(640, 250), "ok", "inn", Vector2(168, 48))
+	add_obj("bar", "bar", Vector2(640, 250), "ok", "inn", Vector2(168, 48))
+	add_obj("innkeeper", "innkeeper", Vector2(756, 250), "ok")
 	# Kitchen
 	add_obj("kpot0", "pot", Vector2(200, 130), "full", "kitchen")
 	add_obj("kpot1", "pot", Vector2(330, 130), "full", "kitchen")
@@ -413,6 +418,7 @@ func begin_passage() -> void:
 	phase = Phase.PASSAGE
 	hero_pos = HERO_START
 	hero_room = "inn"
+	build_nav("inn")
 	hero_steps = build_hero_script()
 	hero_i = 0
 	hero_t = 0.0
@@ -608,8 +614,52 @@ func finish_dream() -> void:
 
 # =========================================================== Hero script + AI
 
-func step_move(p: Vector2) -> Dictionary:
-	return {"k": "move", "p": p}
+func step_move(p: Vector2, straight: bool = false) -> Dictionary:
+	## straight = walk in a line (used outside the room, through the front door and the Forest exit)
+	return {"k": "move", "p": p, "straight": straight}
+
+
+func build_nav(room: String) -> void:
+	## The Hero obeys the same solid-object rules as Pell: he paths around furniture on a grid.
+	nav = AStarGrid2D.new()
+	nav.region = Rect2i(0, 0, 48, 36)
+	nav.cell_size = Vector2(20, 20)
+	nav.offset = Vector2(10, 10)
+	nav.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES
+	nav.update()
+	var inside: Rect2 = ROOM.grow(-12.0)
+	for cx in 48:
+		for cy in 36:
+			if not inside.has_point(Vector2(cx * 20 + 10, cy * 20 + 10)):
+				nav.set_point_solid(Vector2i(cx, cy), true)
+	for id in objs:
+		var o: Dictionary = objs[id]
+		if o.room != room or o.size.x <= 0.0 or o.type == "grub":
+			continue
+		var r: Rect2 = Rect2(o.pos - o.size / 2.0, o.size).grow(HERO_R)
+		for cx in range(maxi(0, int(floor(r.position.x / 20.0))), mini(48, int(ceil(r.end.x / 20.0)) + 1)):
+			for cy in range(maxi(0, int(floor(r.position.y / 20.0))), mini(36, int(ceil(r.end.y / 20.0)) + 1)):
+				if r.has_point(Vector2(cx * 20 + 10, cy * 20 + 10)):
+					nav.set_point_solid(Vector2i(cx, cy), true)
+
+
+func hero_path(a: Vector2, b: Vector2, straight: bool) -> Array:
+	if straight or nav == null:
+		return [b]
+	var ia: Vector2i = Vector2i(clampi(int(a.x / 20.0), 0, 47), clampi(int(a.y / 20.0), 0, 35))
+	var ib: Vector2i = Vector2i(clampi(int(b.x / 20.0), 0, 47), clampi(int(b.y / 20.0), 0, 35))
+	var was_a: bool = nav.is_point_solid(ia)
+	var was_b: bool = nav.is_point_solid(ib)
+	nav.set_point_solid(ia, false)
+	nav.set_point_solid(ib, false)
+	var pts: PackedVector2Array = nav.get_point_path(ia, ib)
+	nav.set_point_solid(ia, was_a)
+	nav.set_point_solid(ib, was_b)
+	var out: Array = []
+	for i in range(1, pts.size()):
+		out.append(pts[i])
+	out.append(b)
+	return out
 
 
 func step_act(a: String, id: String, t: float) -> Dictionary:
@@ -618,7 +668,7 @@ func step_act(a: String, id: String, t: float) -> Dictionary:
 
 func build_hero_script() -> Array:
 	var s: Array = []
-	s.append(step_move(Vector2(90, 400)))
+	s.append(step_move(Vector2(90, 400), true))
 	s.append(step_act("kick_door", "door", 0.9))
 	if objs["table"].state == "gift":
 		s.append(step_move(Vector2(430, 400)))
@@ -649,7 +699,8 @@ func build_hero_script() -> Array:
 	s.append(step_act("chestB", "chestB", 1.2))
 	s.append(step_move(GRUB_SPAWN + Vector2(-40, 0)))
 	s.append(step_act("grub", "grub", 1.0))
-	s.append(step_move(Vector2(920, 420)))
+	s.append(step_move(Vector2(845, 420)))
+	s.append(step_move(Vector2(920, 420), true))
 	return s
 
 
@@ -661,14 +712,23 @@ func update_hero(dt: float) -> void:
 	if st.k == "warp":
 		hero_room = st.room
 		hero_pos = st.p
+		build_nav(hero_room)
 		hero_i += 1
 		return
 	if st.k == "move":
-		var d: Vector2 = st.p - hero_pos
+		if not st.has("path"):
+			st["path"] = hero_path(hero_pos, st.p, st.straight)
+			st["pi"] = 0
+		var path: Array = st.path
+		if st.pi >= path.size():
+			hero_i += 1
+			return
+		var tgt: Vector2 = path[st.pi]
+		var d: Vector2 = tgt - hero_pos
 		var stp: float = HERO_SPEED * dt
 		if d.length() <= stp:
-			hero_pos = st.p
-			hero_i += 1
+			hero_pos = tgt
+			st["pi"] = st.pi + 1
 		else:
 			hero_pos += d.normalized() * stp
 	else:
@@ -767,7 +827,7 @@ func reach_list() -> Array:
 	var out: Array = []
 	for id in objs:
 		var o: Dictionary = objs[id]
-		if o.room != cur_room or o.type in ["counter", "stove", "ktable"]:
+		if o.room != cur_room or o.type in ["counter", "stove", "ktable", "bar"]:
 			continue
 		var d: float = pell.distance_to(o.pos)
 		if d <= REACH + (30.0 if o.type == "board" else 0.0):
@@ -1354,6 +1414,8 @@ func obj_sprite(o: Dictionary) -> String:
 			return "cart"
 		"grub":
 			return "grub_ok" if o.state == "ok" else "grub_out"
+		"innkeeper":
+			return "innkeeper"
 	return ""
 
 
@@ -1393,7 +1455,7 @@ func draw_world() -> void:
 		var o: Dictionary = objs[id]
 		if o.room != cur_room or o.type == "door":
 			continue
-		if o.type in ["counter", "stove", "ktable", "innkeeper"]:
+		if o.type in ["counter", "stove", "ktable", "bar"]:
 			# long furniture is drawn in chunks so people can walk in front of / behind it
 			var long_x: bool = o.size.x >= o.size.y
 			var n: int = maxi(1, ceili((o.size.x if long_x else o.size.y) / 56.0))
@@ -1468,10 +1530,8 @@ func draw_room_shell(floor_col: Color, wall_col: Color, inn: bool) -> void:
 
 
 func draw_chunk(o: Dictionary, c: Vector2, s: Vector2) -> void:
-	var block: String = {"counter": "block_counter", "stove": "block_stove", "ktable": "block_ktable", "innkeeper": "block_bar"}.get(o.type, "")
+	var block: String = {"counter": "block_counter", "stove": "block_stove", "ktable": "block_ktable", "bar": "block_bar"}.get(o.type, "")
 	if block != "" and sprite(block) != null:
-		if o.type == "innkeeper" and c.distance_to(o.pos) < 30.0:
-			d_sprite("innkeeper", o.pos + Vector2(0, -26), 12.0)  # stands on a stool behind the bar
 		d_sprite(block, c)
 		return
 	match o.type:
@@ -1481,23 +1541,21 @@ func draw_chunk(o: Dictionary, c: Vector2, s: Vector2) -> void:
 			cuboid(c, s, 56.0, Color(0.3, 0.3, 0.3))
 		"ktable":
 			cuboid(c, s, 26.0, Color(0.5, 0.4, 0.3))
-		"innkeeper":
-			cuboid(c, s, 30.0, Color(0.42, 0.26, 0.14))
-			if c.distance_to(o.pos) < 30.0:
-				person(o.pos + Vector2(0, -34), Color(0.7, 0.3, 0.3), 10.0, 36.0)
+		"bar":
+			cuboid(c, s, 16.0, Color(0.42, 0.26, 0.14))
 
 
 func draw_obj(o: Dictionary) -> void:
 	var p: Vector2 = o.pos
 	var sn: String = obj_sprite(o)
 	if sn != "" and sprite(sn) != null:
-		if o.type == "grub":
+		if o.type == "grub" or o.type == "innkeeper":
 			d_poly(ellipse_pts(iso(p), 18.0, 9.0), Color(0, 0, 0, 0.35))
 		d_sprite(sn, p)
 		if o.type == "barrel" and o.state == "kicked":
 			d_line(iso(p + Vector2(30, 24), 0.0), iso(p + Vector2(34, -24), 60.0), Color(0.6, 0.88, 1.0), 4.0)
 		if o.type == "table" and o.state == "gift":
-			d_sprite("item_gift", p, 17.0)
+			d_sprite("item_gift", p, 14.0)
 		return
 	match o.type:
 		"pot":
@@ -1596,9 +1654,11 @@ func draw_labels() -> void:
 			"cart":
 				txt(iso(p, 30.0) + Vector2(-14, 0), "CART", 11, Color(0.85, 0.9, 0.95))
 			"innkeeper":
-				txt(iso(p + Vector2(0, -34), 58.0) + Vector2(-44, 0), "INNKEEPER'S BAR", 11, Color(1, 0.88, 0.6))
+				txt(iso(p, 46.0) + Vector2(-26, 0), "Innkeeper", 11, Color(1, 0.88, 0.6))
+			"bar":
+				txt(iso(p, 30.0) + Vector2(-14, 0), "BAR", 10, Color(1, 0.88, 0.6))
 			"counter", "stove", "ktable":
-				txt(iso(p, 56.0 if o.type == "stove" else 40.0) + Vector2(-24, 0), String(o.type).to_upper(), 10, Color(0.85, 0.85, 0.9))
+				txt(iso(p, 40.0 if o.type == "stove" else 26.0) + Vector2(-24, 0), String(o.type).to_upper(), 10, Color(0.85, 0.85, 0.9))
 	for fi in floor_items:
 		if fi.room == cur_room and pell.distance_to(fi.pos) < 120.0:
 			txt(iso(fi.pos, 22.0) + Vector2(-30, 0), String(fi.item.name), 11, Color(1, 1, 1))
