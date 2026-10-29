@@ -761,8 +761,12 @@ func build_hero_script() -> Array:
 	s.append(step_act("chestC", "chestC", 1.2))
 	s.append(step_move(Vector2(DOORWAY_X, 70)))
 	s.append({"k": "warp", "room": "inn", "p": Vector2(DOORWAY_X, 665)})
-	s.append(step_move(Vector2(165, 560)))
-	s.append(step_act("chestA", "chestA", 1.2))
+	var to_a: Dictionary = step_move(Vector2(165, 560))
+	var at_a: Dictionary = step_act("chestA", "chestA", 1.2)
+	to_a["tag"] = "chestA"
+	at_a["tag"] = "chestA"
+	s.append(to_a)
+	s.append(at_a)
 	s.append(step_move(Vector2(735, 590)))
 	s.append(step_act("chestB", "chestB", 1.2))
 	s.append(step_move(GRUB_SPAWN + Vector2(-40, 0)))
@@ -952,6 +956,8 @@ func labels(t: Dictionary) -> Array:
 				return ["Close and restock chest (1 action)", ""]
 			if o.gap:
 				return ["Slip a fake in to hide the gap (free)" if junk_index() >= 0 else "Empty chest - you need a fake to hide it", ""]
+			if o.item != null:
+				return ["Open the chest and take %s (free - closing it is a new chore)" % o.item.name, ""]
 			return ["", ""]
 		"door":
 			return ["Repair door (1 action)", ""] if o.state == "broken" else ["", ""]
@@ -1020,6 +1026,14 @@ func do_interact(t: Dictionary, alt: bool) -> void:
 			if o.state == "closed":
 				if o.gap:
 					fill_gap(o)
+				elif o.item != null and add_to_satchel(o.item):
+					# the Hero never touched this chest - Pell opens it, which makes closing it a new chore
+					say("You open the chest and pocket the %s. Now it has to be closed again." % o.item.name)
+					o.item = null
+					o.took = true
+					o.state = "open"
+					orders[o.id] = {"label": "Restock chest", "done": false}
+					lean_up("defiance", 5)
 				return
 			if not alt and o.item != null:
 				if add_to_satchel(o.item):
@@ -1164,7 +1178,17 @@ func talk_to_hero(opt: int) -> void:
 		3: ["Heard the chest by the cellar is cursed. I'd skip it.", {"Oblivious": "Cursed? Pfft. ...Fine, I'll skip it.", "Curious": "Cursed? ...Huh. Okay.", "Suspicious": "Cursed. Sure. How would YOU know?", "Engaged": "Nice try."}],
 	}
 	story("Pell", table[opt][0])
-	story("Hero", ("...Again? We just talked." if repeat else table[opt][1][st]))
+	var agrees: bool = false
+	if opt == 3 and not repeat and chest_still_ahead():
+		agrees = st == "Oblivious" or st == "Curious" or (st == "Suspicious" and randf() < 0.5)
+	if repeat:
+		story("Hero", "...Again? We just talked.")
+	elif opt == 3 and not chest_still_ahead():
+		story("Hero", "I already opened it. Nothing happened. ...Huh.")
+	elif opt == 3 and agrees:
+		story("Hero", {"Oblivious": "Cursed? Pfft. ...Fine, I'll skip it.", "Curious": "Cursed? ...Huh. Okay, skipping it.", "Suspicious": "Cursed... fine. Not worth the risk."}[st])
+	else:
+		story("Hero", table[opt][1][st])
 	match opt:
 		1:
 			lean_up("charm", 3)
@@ -1175,8 +1199,26 @@ func talk_to_hero(opt: int) -> void:
 			hero.greed = maxi(0, hero.greed - 2)
 		3:
 			lean_up("control", 4)
-			if not repeat and (st == "Oblivious" or st == "Curious" or (st == "Suspicious" and randf() < 0.5)):
+			if agrees:
 				hero_skip_chest = true
+				skip_chest_steps()
+				add_fact("hero_gullible", "The Hero will skip a chest if the cleaner says it is cursed. He believes anything a nearby NPC tells him.")
+
+
+func chest_still_ahead() -> bool:
+	for i in range(hero_i, hero_steps.size()):
+		if hero_steps[i].get("tag", "") == "chestA":
+			return true
+	return false
+
+
+func skip_chest_steps() -> void:
+	## The Hero really does skip it: he no longer walks to the chest at all.
+	var keep: Array = []
+	for i in hero_steps.size():
+		if i < hero_i or hero_steps[i].get("tag", "") != "chestA":
+			keep.append(hero_steps[i])
+	hero_steps = keep
 
 
 func handle_hero_talk_key(k: int) -> void:
