@@ -29,6 +29,8 @@ Everything is drawn in code (`scripts/main.gd`), no assets needed.
 - Hidden Leanings (Control / Defiance / Compassion / Charm) rise from what you do and pick the ending text; second leaning is the "blend".
 - Hero drives (greed / mercy) shift from your notes and gifts and change his behaviour.
 - Guild Suspicion and Hero Awareness meters with their consequences.
+- Grace period (`GRACE_LOOPS`, 3): in the first loops the Guild only skims your work (Suspicion cannot rise) and the Hero does not pay attention (Awareness cannot rise), so players can learn the loop.
+- Pell can interact with the Hero during his passage: E = talk (greet / remind him the pots are someone's / say a chest is cursed, which can make him skip it); F = attack, only if a weapon (sword, bow, blade) is in the satchel. The fight is a short round-based exchange; armour in the satchel adds HP. Winning breaks the story and rewinds early; dying loses the loop's unbanked Journal entries and fragments.
 - Unfinished work stays undone: a missed restock, repair or Grub reset is not reset with the world, shows up next loop as an OVERDUE order, and raises the Hero's Awareness a little each loop it persists (5 per leftover task) until you actually do it.
 - Coin and the cheating Guild: wages arrive only at the end of the shift (itemised payslip: rent, broom rental, laundering, "misc. adjustment"), so at Memory Depth 1 coin is worthless after the reset. From Depth 2 you keep coin for one cycle (spend it or lose it) and the Journal/Pell expose how little the Guild actually pays. The Innkeeper's bar sells tea (+2 actions), bread (gift) and fakes; prices rise with the Hero's act while pay stays flat.
 - Solid furniture: pots, chests, barrel, tables, cart and Grub block movement.

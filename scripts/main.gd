@@ -16,6 +16,8 @@ const FRAGMENTS_NEEDED := 3
 const PELL_SPEED := 230.0
 const HERO_SPEED := 170.0
 const REACH := 56.0
+## First loops are a free tutorial: the Guild doesn't raise Suspicion and the Hero doesn't pay attention.
+const GRACE_LOOPS := 3
 const HERO_R := 14.0
 const PELL_R := 13.0
 const DOORWAY_X := 680.0
@@ -70,6 +72,11 @@ var learned_this_loop: Array = []
 var report: Array = []
 var dream_lines: Array = []
 var bribed: bool = false
+var talked_to_hero: bool = false
+var hero_skip_chest: bool = false
+var fight: Dictionary = {}
+var snap: Dictionary = {}
+var dream_note: String = ""
 var backlog: Dictionary = {}   # id -> true: work left undone, persists across resets until actually done
 var mess_noticed: bool = false
 
@@ -144,6 +151,16 @@ void fragment() {
 	ui_layer.add_child(ui_overlay)
 
 
+func in_grace() -> bool:
+	return loop_no <= GRACE_LOOPS
+
+
+func add_awareness(n: float) -> void:
+	if in_grace() and n > 0.0:
+		return
+	hero.awareness = clampf(hero.awareness + n, 0.0, 100.0)
+
+
 func tier() -> int:
 	return mini(5, 1 + floori((loop_no - 1) / 2.0))
 
@@ -197,6 +214,9 @@ func reset_world() -> void:
 	satchel = []
 	coin = 0
 	shop_greeted = false
+	talked_to_hero = false
+	hero_skip_chest = false
+	fight = {}
 	bribed = false
 	learned_this_loop = []
 	in_cart = false
@@ -424,10 +444,11 @@ func begin_passage() -> void:
 	hero_i = 0
 	hero_t = 0.0
 	hero_started = false
+	snap = {"journal": journal.duplicate(true), "fragments": fragments, "found": found.duplicate(true)}
 	say("The Hero is coming. Stay close enough to learn, far enough not to be seen.")
-	if not backlog.is_empty():
+	if not backlog.is_empty() and not in_grace():
 		# A mess that never gets cleaned makes the Hero wonder - without him knowing why.
-		hero.awareness = minf(100.0, hero.awareness + 5.0 * backlog.size())
+		add_awareness(5.0 * backlog.size())
 		bark("Huh. That's still broken? Didn't I do that yesterday?")
 		if not mess_noticed:
 			mess_noticed = true
@@ -501,8 +522,14 @@ func end_shift() -> void:
 	else:
 		delta = int(round((0.7 - dil) / 0.7 * 30.0))
 	var verdict: String = "Excellent." if dil >= 0.9 else ("Acceptable." if dil >= 0.7 else ("Sloppy." if dil >= 0.4 else "Disgraceful."))
-	report.append("Bramm: \"%s\"  Suspicion %s%d" % [verdict, "+" if delta >= 0 else "", delta])
-	if gaps > 0:
+	if in_grace() and delta > 0:
+		delta = 0
+		report.append("Bramm: \"%s\"  He only skims your work this early. Suspicion unchanged." % verdict)
+	else:
+		report.append("Bramm: \"%s\"  Suspicion %s%d" % [verdict, "+" if delta >= 0 else "", delta])
+	if gaps > 0 and in_grace():
+		report.append("Bramm doesn't look inside the chests. Yet.")
+	elif gaps > 0:
 		delta += 15 * gaps
 		report.append("Bramm frowns at an empty chest.  Suspicion +%d" % (15 * gaps))
 	payslips += 1
@@ -558,6 +585,9 @@ func begin_dream() -> void:
 	phase = Phase.DREAM
 	dream_lines = []
 	dream_lines.append("The world rewinds.")
+	if dream_note != "":
+		dream_lines.append(dream_note)
+		dream_note = ""
 	dream_lines.append("")
 	var lost: Array = []
 	for it in satchel:
@@ -597,6 +627,8 @@ func finish_dream() -> void:
 		phase = Phase.ENDING
 		return
 	var old_tier: int = tier()
+	if loop_no == GRACE_LOOPS:
+		story("Pell", "Bramm's started reading the paperwork properly. And the Hero looked right at me yesterday. The slack is over.")
 	if memory_depth() >= 2:
 		if carried_coin == 0 and coin > 0 and not journal.has("coin_kept"):
 			add_fact("coin_kept", "With enough memory, a few coins stay in my pocket for one cycle. The Guild's wages were never meant to be kept.")
@@ -771,7 +803,7 @@ func update_hero(dt: float) -> void:
 				st["pi"] = 0
 			elif hero_wait > 3.5:
 				bark("Out of the way, cleaner!")
-				hero.awareness = minf(100.0, hero.awareness + 8.0)
+				add_awareness(8.0)
 				shove_pell()
 				hero_wait = 0.0
 			return
@@ -793,7 +825,7 @@ func update_hero(dt: float) -> void:
 	# Being near the Hero in plain sight raises Awareness.
 	if not in_cart and hero_room == cur_room and pell.distance_to(hero_pos) < 110.0:
 		var before: String = awareness_state()
-		hero.awareness = minf(100.0, hero.awareness + 14.0 * dt)
+		add_awareness(14.0 * dt)
 		if awareness_state() != before:
 			awareness_story()
 
@@ -808,7 +840,7 @@ func hero_do(a: String, o: Dictionary) -> void:
 			o.state = "eaten"
 			hero.mercy = mini(100, hero.mercy + 4)
 			hero.greed = maxi(0, hero.greed - 3)
-			hero.awareness = minf(100.0, hero.awareness + 8.0)
+			add_awareness(8.0)
 			bark("Bread? Who left this here?")
 			witness("hero_gift", "The Hero is a sucker for free bread. A gift softens him.")
 		"read_note":
@@ -840,6 +872,10 @@ func hero_do(a: String, o: Dictionary) -> void:
 			witness("hero_barrel", "Every Cycle the Hero kicks the corner barrel. A hairline crack glows behind it.")
 		"chestA":
 			o.state = "open"
+			if hero_skip_chest:
+				bark("Cursed? ...Pass.")
+				witness("hero_listens", "The Hero skipped a chest because I told him it was cursed. He believes anything the cleaner says.")
+				return
 			var taken: Dictionary = o.item
 			o.item = null
 			bark("Ooh, a %s! Time to upgrade." % taken.name)
@@ -888,6 +924,8 @@ func reach_list() -> Array:
 		var d2: float = pell.distance_to(fi.pos)
 		if d2 <= REACH:
 			out.append({"d": d2 - 20.0, "kind": "floor", "ref": fi})
+	if phase == Phase.PASSAGE and not in_cart and hero_room == cur_room and pell.distance_to(hero_pos) <= 72.0:
+		out.append({"d": pell.distance_to(hero_pos) - 30.0, "kind": "hero", "ref": {"pos": hero_pos}})
 	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.d < b.d)
 	return out
 
@@ -896,6 +934,9 @@ func labels(t: Dictionary) -> Array:
 	## [E label, F label] for the thing at hand; "" = not available.
 	if t.kind == "floor":
 		return ["Pick up " + t.ref.item.name, ""]
+	if t.kind == "hero":
+		var w: Dictionary = best_weapon()
+		return ["Talk to the Hero", ("Attack the Hero (%s)" % w.name) if not w.is_empty() else ""]
 	var o: Dictionary = t.ref
 	if phase == Phase.PASSAGE:
 		return [("Leave the cart" if in_cart else "Hide in the cart"), ""] if o.type == "cart" else ["", ""]
@@ -940,6 +981,12 @@ func interact(alt: bool) -> void:
 
 
 func do_interact(t: Dictionary, alt: bool) -> void:
+	if t.kind == "hero":
+		if alt:
+			start_fight()
+		else:
+			menu = "hero_talk"
+		return
 	if t.kind == "floor":
 		var fi: Dictionary = t.ref
 		var it: Dictionary = fi.item
@@ -1061,6 +1108,154 @@ func talk_to_grub() -> void:
 		story("Grub", "Zzz... five more minutes...")
 
 
+func is_weapon(it: Dictionary) -> bool:
+	var n: String = String(it.name)
+	return it.kind == "gear" and (n.contains("Sword") or n.contains("Bow") or n.contains("Blade"))
+
+
+func best_weapon() -> Dictionary:
+	var best: Dictionary = {}
+	for it in satchel:
+		if is_weapon(it) and (best.is_empty() or it.power > best.power):
+			best = it
+	return best
+
+
+func armour_power() -> int:
+	var a: int = 0
+	for it in satchel:
+		if it.kind == "gear" and not is_weapon(it):
+			a += int(it.power)
+	return a
+
+
+func talk_to_hero(opt: int) -> void:
+	var st: String = awareness_state()
+	var repeat: bool = talked_to_hero
+	talked_to_hero = true
+	add_awareness(12.0 if repeat else 6.0)
+	add_fact("hero_talk", "The Hero will answer if you speak to him. He treats anyone nearby like a quest-giver.")
+	var table: Dictionary = {
+		1: ["Morning. Lovely day for... all of this.", {"Oblivious": "Hm? Oh. Morning. Is there a quest?", "Curious": "Morning. ...Have we met?", "Suspicious": "You again. You're always around.", "Engaged": "I know your face. Who ARE you?"}],
+		2: ["The pots are somebody's livelihood, you know.", {"Oblivious": "Pots? ...They're pots.", "Curious": "Huh. Never thought about whose they were.", "Suspicious": "Is that a threat?", "Engaged": "Stay out of my way, cleaner."}],
+		3: ["Heard the chest by the cellar is cursed. I'd skip it.", {"Oblivious": "Cursed? Pfft. ...Fine, I'll skip it.", "Curious": "Cursed? ...Huh. Okay.", "Suspicious": "Cursed. Sure. How would YOU know?", "Engaged": "Nice try."}],
+	}
+	story("Pell", table[opt][0])
+	story("Hero", ("...Again? We just talked." if repeat else table[opt][1][st]))
+	match opt:
+		1:
+			lean_up("charm", 3)
+			hero.mercy = mini(100, hero.mercy + 1)
+		2:
+			lean_up("compassion", 4)
+			hero.mercy = mini(100, hero.mercy + 3)
+			hero.greed = maxi(0, hero.greed - 2)
+		3:
+			lean_up("control", 4)
+			if not repeat and (st == "Oblivious" or st == "Curious" or (st == "Suspicious" and randf() < 0.5)):
+				hero_skip_chest = true
+
+
+func handle_hero_talk_key(k: int) -> void:
+	if k == KEY_ESCAPE:
+		menu = ""
+		return
+	if k >= KEY_1 and k <= KEY_3:
+		menu = ""
+		talk_to_hero(k - KEY_1 + 1)
+
+
+func start_fight() -> void:
+	var w: Dictionary = best_weapon()
+	if w.is_empty():
+		return
+	var hm: int = 8 + 6 * tier()
+	var pm: int = 3 + floori(armour_power() / 5.0)
+	fight = {"w": w, "hh": hm, "hm": hm, "ph": pm, "pm": pm, "round": 0, "log": ["You draw the %s. The Hero turns around." % w.name]}
+	menu = "fight"
+	lean_up("defiance", 3)
+
+
+func hero_counter() -> void:
+	if randf() < 0.55 + 0.03 * tier():
+		var dmg: int = 1 + (1 if tier() >= 3 else 0)
+		fight.ph -= dmg
+		fight.log.append("The Hero hits you for %d." % dmg)
+	else:
+		fight.log.append("You dodge the Hero's swing.")
+	if fight.ph <= 0:
+		fight_lose()
+
+
+func fight_attack() -> void:
+	var w: int = int(fight.w.power)
+	var surprise: bool = fight.round == 0 and hero.awareness < 60.0
+	var p_hit: float = clampf(0.30 + 0.025 * w - 0.04 * tier() + (0.2 if surprise else 0.0), 0.10, 0.85)
+	fight.round += 1
+	if randf() < p_hit:
+		var dmg: int = w + randi_range(0, 2)
+		fight.hh -= dmg
+		fight.log.append("You hit the Hero for %d%s." % [dmg, " (surprise!)" if surprise else ""])
+	else:
+		fight.log.append("You miss.")
+	if fight.hh <= 0:
+		fight_win()
+		return
+	hero_counter()
+
+
+func fight_flee() -> void:
+	if randf() < 0.5:
+		fight = {}
+		menu = ""
+		hero.awareness = maxf(hero.awareness, 60.0)
+		bark("Hey! Get back here, cleaner!")
+		shove_pell()
+		say("You bolt. The Hero will remember this loop - he just doesn't know why yet.")
+	else:
+		fight.log.append("You can't get away!")
+		hero_counter()
+
+
+func end_loop_early(note: String) -> void:
+	menu = ""
+	fight = {}
+	in_cart = false
+	hero_pos = Vector2(-100, -100)
+	dream_note = note
+	begin_dream()
+
+
+func fight_win() -> void:
+	lean_up("defiance", 10)
+	story("Pell", "He's on the floor. I did that. ...The whole inn is holding its breath.")
+	story("Pell", "Then the light goes flat, and everything starts to rewind. The Hero keeps his progress. I keep what I learned.")
+	end_loop_early("The Hero fell. The story broke, and the world rewinds early.")
+
+
+func fight_lose() -> void:
+	var lost: int = 0
+	for id in journal:
+		if not snap.get("journal", {}).has(id):
+			lost += 1
+	journal = snap.get("journal", journal)
+	fragments = snap.get("fragments", fragments)
+	found = snap.get("found", found)
+	learned_this_loop = []
+	story("Pell", "Ow. That's... that's the floor. Everything is going dark.")
+	end_loop_early("You died. The memories you hadn't banked this cycle are gone (%d Journal entries). Memory Depth and Leanings stay. Death is a setback, not a game over." % lost)
+
+
+func handle_fight_key(k: int) -> void:
+	if fight.is_empty():
+		menu = ""
+		return
+	if k == KEY_1:
+		fight_attack()
+	elif k == KEY_2:
+		fight_flee()
+
+
 func use_item(i: int) -> void:
 	if i >= satchel.size():
 		return
@@ -1107,6 +1302,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if menu == "shop":
 		handle_shop_key(k)
+		return
+	if menu == "hero_talk":
+		handle_hero_talk_key(k)
+		return
+	if menu == "fight":
+		handle_fight_key(k)
 		return
 	var enter: bool = (k == KEY_ENTER or k == KEY_KP_ENTER)
 	match phase:
@@ -1345,6 +1546,10 @@ func draw_overlay(c: CanvasItem) -> void:
 		draw_note_menu()
 	elif menu == "shop":
 		draw_shop()
+	elif menu == "hero_talk":
+		draw_hero_talk()
+	elif menu == "fight":
+		draw_fight()
 	if show_journal:
 		draw_journal()
 	draw_toast()
@@ -1669,7 +1874,7 @@ func draw_marker() -> void:
 		if lb[0] == "" and lb[1] == "":
 			continue
 		var pos: Vector2 = t.ref.pos
-		var top: float = 70.0 if t.kind == "obj" else 24.0
+		var top: float = 70.0 if t.kind == "obj" else (56.0 if t.kind == "hero" else 24.0)
 		var bob: float = sin(float(Time.get_ticks_msec()) / 160.0) * 3.0
 		var a: Vector2 = iso(pos, top + 14.0) + Vector2(0, bob)
 		d_poly([a + Vector2(-8, -10), a + Vector2(8, -10), a], Color(1, 0.92, 0.3))
@@ -1890,6 +2095,38 @@ func draw_shop() -> void:
 	y += 20.0
 	para(Vector2(r.position.x + 24, y), "Prices rise with the Hero's act. Your wage does not.", 550.0, 13, Color(0.75, 0.75, 0.8))
 	txt(Vector2(r.position.x + 24, r.end.y - 20), "[Esc] close", 13, Color(0.6, 0.6, 0.65))
+
+
+func draw_hero_talk() -> void:
+	var r: Rect2 = overlay("SPEAK TO THE HERO")
+	var y: float = r.position.y + 90.0
+	para(Vector2(r.position.x + 24, y), "Nobody talks to the cleaner. Nobody expects the cleaner to talk back.", 550.0, 14, Color(0.8, 0.8, 0.85))
+	y += 50.0
+	txt(Vector2(r.position.x + 24, y), "[1] Greet him   (Charm)", 16, Color(1, 0.85, 0.9))
+	y += 32.0
+	txt(Vector2(r.position.x + 24, y), "[2] Remind him the pots belong to someone   (Compassion)", 16, Color(0.6, 0.9, 0.6))
+	y += 32.0
+	txt(Vector2(r.position.x + 24, y), "[3] Tell him a chest is cursed   (Control)", 16, Color(0.9, 0.7, 0.5))
+	txt(Vector2(r.position.x + 24, r.end.y - 20), "[Esc] say nothing     (Talking draws his attention.)", 13, Color(0.6, 0.6, 0.65))
+
+
+func draw_fight() -> void:
+	if fight.is_empty():
+		return
+	var r: Rect2 = overlay("FIGHT THE HERO")
+	var y: float = r.position.y + 84.0
+	txt(Vector2(r.position.x + 24, y), "You  %d/%d" % [maxi(0, fight.ph), fight.pm], 15, Color(0.6, 0.8, 1))
+	bar(Vector2(r.position.x + 120, y - 12), 300.0, float(fight.ph) / float(fight.pm), Color(0.4, 0.7, 0.95))
+	y += 30.0
+	txt(Vector2(r.position.x + 24, y), "Hero %d/%d" % [maxi(0, fight.hh), fight.hm], 15, Color(1, 0.85, 0.4))
+	bar(Vector2(r.position.x + 120, y - 12), 300.0, float(fight.hh) / float(fight.hm), Color(0.9, 0.7, 0.25))
+	y += 40.0
+	var start: int = maxi(0, fight.log.size() - 7)
+	for i in range(start, fight.log.size()):
+		txt(Vector2(r.position.x + 24, y), String(fight.log[i]), 14, Color(0.9, 0.9, 0.95))
+		y += 24.0
+	txt(Vector2(r.position.x + 24, r.end.y - 44), "[1] Attack with the %s     [2] Run" % fight.w.name, 15, Color(1, 0.95, 0.6))
+	txt(Vector2(r.position.x + 24, r.end.y - 20), "Better gear in your satchel makes you tougher. He is a Hero, and you are a cleaner.", 12, Color(0.6, 0.6, 0.65))
 
 
 func draw_note_menu() -> void:
