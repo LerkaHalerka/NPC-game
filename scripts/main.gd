@@ -296,9 +296,9 @@ func shop_stock() -> Array:
 	## Prices follow the Hero's act. Your wage doesn't.
 	var m: float = 1.0 + 0.25 * (tier() - 1)
 	return [
-		{"id": "tea", "name": "Strong Tea (+2 actions)", "price": int(round(8.0 * m))},
-		{"id": "bread", "name": "Fresh Bread (gift for the Hero)", "price": int(round(5.0 * m))},
-		{"id": "fake", "name": "Convincing Fake (swap for loot)", "price": int(round(7.0 * m))},
+		{"id": "tea", "name": "Strong Tea (+2 actions)", "price": int(round(11.0 * m))},
+		{"id": "bread", "name": "Fresh Bread (gift for the Hero)", "price": int(round(7.0 * m))},
+		{"id": "fake", "name": "Convincing Fake (swap for loot)", "price": int(round(10.0 * m))},
 	]
 
 
@@ -947,7 +947,11 @@ func labels(t: Dictionary) -> Array:
 			if o.state == "open" and o.item != null:
 				return ["Take %s (free - but leaves a gap)" % o.item.name, "Close chest as-is (1 action)"]
 			if o.state == "open":
+				if o.took:
+					return ["Close chest, slipping in a fake (1 action)" if junk_index() >= 0 else "Close chest - it will look empty! (1 action)", ""]
 				return ["Close and restock chest (1 action)", ""]
+			if o.gap:
+				return ["Slip a fake in to hide the gap (free)" if junk_index() >= 0 else "Empty chest - you need a fake to hide it", ""]
 			return ["", ""]
 		"door":
 			return ["Repair door (1 action)", ""] if o.state == "broken" else ["", ""]
@@ -1013,6 +1017,10 @@ func do_interact(t: Dictionary, alt: bool) -> void:
 				complete_order(o.id)
 				say("Pot restocked.")
 		"chest":
+			if o.state == "closed":
+				if o.gap:
+					fill_gap(o)
+				return
 			if not alt and o.item != null:
 				if add_to_satchel(o.item):
 					say("Pocketed the %s. The chest looks suspiciously empty." % o.item.name)
@@ -1024,11 +1032,7 @@ func do_interact(t: Dictionary, alt: bool) -> void:
 					o.state = "closed"
 					complete_order(o.id)
 					if o.took:
-						var idx: int = -1
-						for i in satchel.size():
-							if satchel[i].kind == "junk":
-								idx = i
-								break
+						var idx: int = junk_index()
 						if idx >= 0:
 							satchel.remove_at(idx)
 							say("You slip a Scrap of Cloth in as a 'fake'. Bramm won't notice. Probably.")
@@ -1094,6 +1098,25 @@ func do_interact(t: Dictionary, alt: bool) -> void:
 				story("Innkeeper", "Welcome to the Sleeping Stag! First time here, love? Prices are posted. They never change. (They do.)")
 				if memory_depth() >= 2:
 					story("Pell", "I've bought tea from her two hundred times. She has never once remembered my face. Her prices climb with every act of the Hero's quest. My pay doesn't.")
+
+
+func junk_index() -> int:
+	for i in satchel.size():
+		if satchel[i].kind == "junk":
+			return i
+	return -1
+
+
+func fill_gap(o: Dictionary) -> void:
+	## A fake (Scrap of Cloth / Convincing Fake) hides an empty chest, even after it has been closed.
+	var idx: int = junk_index()
+	if idx < 0:
+		say("The chest is empty and Bramm will notice. You need a fake to hide it (the bar sells them).")
+		return
+	satchel.remove_at(idx)
+	o.gap = false
+	lean_up("defiance", 2)
+	say("You slip a fake into the chest. Bramm won't notice. Probably.")
 
 
 func talk_to_grub() -> void:
