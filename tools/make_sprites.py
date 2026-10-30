@@ -218,6 +218,63 @@ def block_stove():
     finish("block_stove", img)
 
 
+# ------------------------------------------------------------------ village props
+def crate_full():
+    img, d = new_canvas()
+    box(d, 0, 0, 30, 30, 0, 20, (168, 124, 66, 255), "wood")
+    line3(d, (-15, 15, 10), (15, 15, 10), (110, 76, 40, 255))
+    line3(d, (15, 15, 10), (15, -15, 10), (90, 62, 32, 255))
+    finish("crate_full", img)
+
+
+def crate_broken():
+    img, d = new_canvas()
+    for (x, y, w, h) in [(-8, 4, 14, 5), (7, 8, 12, 4), (-2, -8, 16, 4), (10, -6, 5, 12)]:
+        box(d, x, y, w, h, 0, 3, (150, 108, 56, 255))
+    box(d, -6, 12, 10, 4, 0, 6, (120, 84, 44, 255))
+    finish("crate_broken", img)
+
+
+def tree():
+    img, d = new_canvas()
+    cylinder(d, 0, 0, 5, 0, 26, (110, 76, 42, 255))
+    for (dx, dy, r) in [(-11, 30, 10), (10, 31, 10), (0, 42, 12), (-4, 53, 10), (7, 49, 10)]:
+        ellipse(d, (CX + dx, CY - dy), r, r * 0.9, (60, 130, 56, 255), (40, 90, 40, 255))
+    ellipse(d, (CX - 3, CY - 44), 7, 6, (84, 160, 70, 255))
+    finish("tree", img)
+
+
+def well():
+    img, d = new_canvas()
+    cylinder(d, 0, 0, 22, 0, 16, (140, 140, 150, 255), top_col=(30, 50, 80, 255))
+    box(d, -20, -2, 4, 4, 16, 46, (110, 76, 42, 255))
+    box(d, 20, -2, 4, 4, 16, 46, (110, 76, 42, 255))
+    box(d, 0, -2, 50, 8, 44, 49, (150, 70, 60, 255))
+    finish("well", img)
+
+
+def block_stall():
+    img, d = new_canvas()
+    box(d, 0, -14, 4, 4, 0, 40, DWOOD)
+    box(d, 0, 0, 56, 40, 0, 13, (150, 100, 55, 255), "wood")
+    box(d, 0, 0, 56, 40, 13, 16, (120, 80, 44, 255))
+    for x in (-26, 26):
+        box(d, x, 16, 4, 4, 16, 40, DWOOD)
+    box(d, 0, 0, 56, 44, 40, 44, (205, 70, 60, 255))
+    for xx in range(-24, 28, 16):
+        box(d, xx, 0, 8, 44, 40, 44, (240, 232, 220, 255), outline=False)
+    finish("block_stall", img)
+
+
+def block_smithy():
+    img, d = new_canvas()
+    box(d, 0, 0, 56, 56, 0, 14, (86, 86, 94, 255), "stone")
+    box(d, -6, 0, 30, 10, 14, 20, (50, 50, 56, 255))        # anvil
+    box(d, -20, 0, 10, 8, 14, 17, (50, 50, 56, 255))
+    d.polygon([P(8, -14, 14), P(24, -14, 14), P(24, 14, 14), P(8, 14, 14)], fill=(230, 110, 30, 255))   # glowing coals
+    finish("block_smithy", img)
+
+
 # ------------------------------------------------------------------ ascii sprites
 PAL = {
     "k": (27, 22, 32), "s": (241, 201, 160), "S": (214, 160, 120), "h": (90, 58, 34), "H": (62, 40, 24),
@@ -384,6 +441,15 @@ def main():
     ascii_sprite("grub_out", GRUB_OUT)
     for k, rows in ITEMS.items():
         ascii_sprite(k, rows)
+    for fn in (crate_full, crate_broken, tree, well, block_stall, block_smithy):
+        fn()
+    for name, mapping in {
+        "tilly": {"r": "p", "h": "y"},
+        "mara": {"r": "n", "w": "T", "h": "H"},
+        "mayor": {"r": "B", "w": "Y", "h": "g"},
+        "wenna": {"r": "G", "w": "g", "h": "g"},
+    }.items():
+        ascii_sprite(name, ["".join(mapping.get(c, c) for c in row) for row in INNKEEPER])
     write_data()
     print("wrote", len(anchors), "sprites")
 

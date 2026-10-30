@@ -23,7 +23,18 @@ const PELL_R := 13.0
 const DOORWAY_X := 680.0
 const SIGHT := 300.0
 const GRUB_SPAWN := Vector2(650, 480)
-const HERO_START := Vector2(14, 400)
+const HERO_START := Vector2(14, 520)   # the village road, west edge
+const VDOOR_X := 300.0                  # the Inn's front door, seen from the village
+const VILLAGE_EXIT := Vector2(850, 520)  # the road out of Thornbury
+const CHUNK_TYPES := ["counter", "stove", "ktable", "bar", "stall", "smithy"]
+## Placeholder flavour lines for the village NPCs (real lore comes later).
+const NPC_LINES := {
+	"tilly": ["Morning, Pell! Isn't it a lovely day for putting things back?", "You look tired. I always sleep SO well!", "Same pots every day. Isn't that nice? Predictable!"],
+	"mara": ["Hot work. The forge doesn't light itself. ...Why do I feel like it's about to go wrong?", "Need something mended? Come back later. I'm busy.", "My shop's fine. Why wouldn't it be?"],
+	"mayor": ["Move along. Official business. Taxes are very important.", "Bandits? What bandits? I've never heard of any bandits.", "Don't you have a broom to be holding?"],
+	"wenna": ["Seven hundred and four. Seven hundred and five.", "You've got a look. Someone who counts things.", "Shh. Walls have ears. Roofs too."],
+}
+const NPC_NAMES := {"tilly": "Tilly", "mara": "Mara", "mayor": "The Mayor", "wenna": "Old Wenna"}
 const ACT_NAMES := ["Village", "Forest", "Mines", "Capital", "Tower"]
 
 ## [name, kind, power] per Hero act. Better act = better leftovers.
@@ -91,6 +102,7 @@ var text_on: bool = true
 var ui_overlay: Node2D
 var nav: AStarGrid2D
 var hero_wait: float = 0.0
+var npc_talks: Dictionary = {}
 var dialogue: Array = []   # blocking story boxes: {who, text}
 var toast_text: String = ""
 var toast_time: float = 0.0
@@ -198,7 +210,7 @@ func solid_size(type: String) -> Vector2:
 			return Vector2(60, 36)
 		"grub":
 			return Vector2(30, 30)
-		"innkeeper":
+		"innkeeper", "npc":
 			return Vector2(22, 22)
 	return Vector2.ZERO
 
@@ -250,6 +262,23 @@ func reset_world() -> void:
 	add_obj("counter", "counter", Vector2(520, 220), "ok", "kitchen", Vector2(280, 36))
 	add_obj("stove", "stove", Vector2(790, 130), "ok", "kitchen", Vector2(56, 56))
 	add_obj("ktable", "ktable", Vector2(480, 440), "ok", "kitchen", Vector2(168, 84))
+	# Thornbury village
+	for i in 3:
+		add_obj("vpot%d" % i, "pot", Vector2(380 + i * 70, 275), "full", "village")
+	add_obj("crate0", "pot", Vector2(170, 440), "full", "village")
+	add_obj("crate1", "pot", Vector2(235, 415), "full", "village")
+	objs["crate0"]["variant"] = "crate"
+	objs["crate1"]["variant"] = "crate"
+	add_obj("stall", "stall", Vector2(452, 205), "ok", "village", Vector2(168, 40))
+	add_obj("well", "well", Vector2(580, 400), "ok", "village", Vector2(48, 48))
+	add_obj("smithy", "smithy", Vector2(740, 290), "ok", "village", Vector2(56, 56))
+	add_obj("tree0", "tree", Vector2(110, 190), "ok", "village", Vector2(28, 28))
+	add_obj("tree1", "tree", Vector2(790, 190), "ok", "village", Vector2(28, 28))
+	add_obj("tree2", "tree", Vector2(780, 610), "ok", "village", Vector2(28, 28))
+	add_obj("tilly", "npc", Vector2(250, 345), "ok", "village")
+	add_obj("mara", "npc", Vector2(740, 345), "ok", "village")
+	add_obj("mayor", "npc", Vector2(610, 140), "ok", "village")
+	add_obj("wenna", "npc", Vector2(95, 330), "ok", "village")
 	apply_backlog()
 
 
@@ -275,7 +304,8 @@ func backlog_names() -> Array:
 	var out: Array = []
 	for id in backlog:
 		if objs.has(id):
-			out.append({"pot": "broken pot", "chest": "open chest", "door": "broken door", "grub": "Grub out cold"}.get(objs[id].type, "a mess"))
+			var nm: String = {"pot": "broken pot", "chest": "open chest", "door": "broken door", "grub": "Grub out cold"}.get(objs[id].type, "a mess")
+			out.append("broken crate" if objs[id].get("variant", "") == "crate" else nm)
 	return out
 
 
@@ -438,8 +468,8 @@ func dominant_lean(skip: String = "") -> String:
 func begin_passage() -> void:
 	phase = Phase.PASSAGE
 	hero_pos = HERO_START
-	hero_room = "inn"
-	build_nav("inn")
+	hero_room = "village"
+	build_nav("village")
 	hero_steps = build_hero_script()
 	hero_i = 0
 	hero_t = 0.0
@@ -467,7 +497,7 @@ func end_passage() -> void:
 		match o.type:
 			"pot":
 				if o.state == "broken":
-					orders[id] = {"label": "Restock pot", "done": false}
+					orders[id] = {"label": "Restock crate" if o.get("variant", "") == "crate" else "Restock pot", "done": false}
 			"chest":
 				if o.state == "open":
 					orders[id] = {"label": "Restock chest", "done": false}
@@ -736,7 +766,20 @@ func step_act(a: String, id: String, t: float) -> Dictionary:
 
 func build_hero_script() -> Array:
 	var s: Array = []
-	s.append(step_move(Vector2(90, 400), true))
+	# --- Thornbury: walk in along the road, smash the crates and market pots, head for the Inn
+	s.append(step_move(Vector2(90, 520), true))
+	for cid in ["crate0", "crate1"]:
+		s.append(step_move(objs[cid].pos + Vector2(0, 55)))
+		s.append(step_act("pot", cid, 0.7))
+	var vorder: Array = [0, 1, 2]
+	vorder.shuffle()
+	for i in vorder:
+		var vp: Dictionary = objs["vpot%d" % i]
+		s.append(step_move(vp.pos + Vector2(0, 55)))
+		s.append(step_act("pot", vp.id, 0.7))
+	s.append(step_move(Vector2(VDOOR_X, 72)))
+	s.append({"k": "warp", "room": "inn", "p": Vector2(ROOM.position.x + 45.0, 400)})
+	s.append(step_move(Vector2(90, 400)))
 	s.append(step_act("kick_door", "door", 0.9))
 	if objs["table"].state == "gift":
 		s.append(step_move(Vector2(430, 400)))
@@ -771,8 +814,11 @@ func build_hero_script() -> Array:
 	s.append(step_act("chestB", "chestB", 1.2))
 	s.append(step_move(GRUB_SPAWN + Vector2(-40, 0)))
 	s.append(step_act("grub", "grub", 1.0))
-	s.append(step_move(Vector2(845, 420)))
-	s.append(step_move(Vector2(920, 420), true))
+	# --- back out through the front door, across the village and off down the road
+	s.append(step_move(Vector2(ROOM.position.x + 45.0, 400)))
+	s.append({"k": "warp", "room": "village", "p": Vector2(VDOOR_X, 100)})
+	s.append(step_move(VILLAGE_EXIT - Vector2(10, 0)))
+	s.append(step_move(Vector2(920, 520), true))
 	return s
 
 
@@ -917,7 +963,7 @@ func reach_list() -> Array:
 	var out: Array = []
 	for id in objs:
 		var o: Dictionary = objs[id]
-		if o.room != cur_room or o.type in ["counter", "stove", "ktable", "bar"]:
+		if o.room != cur_room or o.type in CHUNK_TYPES:
 			continue
 		var d: float = pell.distance_to(o.pos)
 		if d <= REACH + (30.0 if o.type == "board" else 0.0):
@@ -946,7 +992,7 @@ func labels(t: Dictionary) -> Array:
 		return [("Leave the cart" if in_cart else "Hide in the cart"), ""] if o.type == "cart" else ["", ""]
 	match o.type:
 		"pot":
-			return ["Restock pot (1 action)", ""] if o.state == "broken" else ["", ""]
+			return ["Restock %s (1 action)" % ("crate" if o.get("variant", "") == "crate" else "pot"), ""] if o.state == "broken" else ["", ""]
 		"chest":
 			if o.state == "open" and o.item != null:
 				return ["Take %s (free - but leaves a gap)" % o.item.name, "Close chest as-is (1 action)"]
@@ -973,6 +1019,8 @@ func labels(t: Dictionary) -> Array:
 			return ["Search behind barrel (story, 1 action)", ""] if o.state == "kicked" else ["", ""]
 		"seam":
 			return ["Open the Seam (stash)", ""]
+		"npc":
+			return ["Talk to %s (free)" % NPC_NAMES.get(o.id, o.id), ""]
 		"innkeeper":
 			return ["Talk to the Innkeeper / buy things (free)", ""]
 	return ["", ""]
@@ -1105,6 +1153,11 @@ func do_interact(t: Dictionary, alt: bool) -> void:
 				say("A dusty crack. If only I knew why he keeps kicking this thing...")
 		"seam":
 			menu = "stash"
+		"npc":
+			var n: int = npc_talks.get(o.id, 0)
+			npc_talks[o.id] = n + 1
+			var lines: Array = NPC_LINES.get(o.id, ["..."])
+			story(NPC_NAMES.get(o.id, o.id), lines[n % lines.size()])
 		"innkeeper":
 			menu = "shop"
 			if not shop_greeted:
@@ -1510,6 +1563,12 @@ func check_doorways() -> void:
 	elif cur_room == "kitchen" and pell.y <= ROOM.position.y + 16.0 and absf(pell.x - DOORWAY_X) < 45.0:
 		cur_room = "inn"
 		pell = Vector2(DOORWAY_X, ROOM.end.y - 45.0)
+	elif cur_room == "inn" and pell.x <= ROOM.position.x + 16.0 and absf(pell.y - 400.0) < 45.0:
+		cur_room = "village"
+		pell = Vector2(VDOOR_X, ROOM.position.y + 45.0)
+	elif cur_room == "village" and pell.y <= ROOM.position.y + 16.0 and absf(pell.x - VDOOR_X) < 45.0:
+		cur_room = "inn"
+		pell = Vector2(ROOM.position.x + 45.0, 400.0)
 
 
 func _process(delta: float) -> void:
@@ -1723,7 +1782,15 @@ func d_sprite(sname: String, wpos: Vector2, z: float = 0.0) -> bool:
 func obj_sprite(o: Dictionary) -> String:
 	match o.type:
 		"pot":
+			if o.get("variant", "") == "crate":
+				return "crate_full" if o.state == "full" else "crate_broken"
 			return "pot_full" if o.state == "full" else "pot_broken"
+		"well":
+			return "well"
+		"tree":
+			return "tree"
+		"npc":
+			return String(o.id)
 		"chest":
 			return "chest_open" if o.state == "open" else "chest_closed"
 		"barrel":
@@ -1768,16 +1835,15 @@ func person(p: Vector2, body: Color, r: float, tall: float, sname: String = "") 
 
 
 func draw_world() -> void:
-	var inn: bool = cur_room == "inn"
-	var floor_col: Color = Color(0.46, 0.32, 0.2) if inn else Color(0.5, 0.5, 0.5)
-	var wall_col: Color = Color(0.6, 0.45, 0.32) if inn else Color(0.66, 0.66, 0.66)
-	draw_room_shell(floor_col, wall_col, inn)
+	var floor_col: Color = {"inn": Color(0.46, 0.32, 0.2), "kitchen": Color(0.5, 0.5, 0.5), "village": Color(0.34, 0.5, 0.28)}[cur_room]
+	var wall_col: Color = {"inn": Color(0.6, 0.45, 0.32), "kitchen": Color(0.66, 0.66, 0.66), "village": Color(0.78, 0.7, 0.55)}[cur_room]
+	draw_room_shell(floor_col, wall_col, cur_room)
 	var items: Array = []
 	for id in objs:
 		var o: Dictionary = objs[id]
 		if o.room != cur_room or o.type == "door":
 			continue
-		if o.type in ["counter", "stove", "ktable", "bar"]:
+		if o.type in CHUNK_TYPES:
 			# long furniture is drawn in chunks so people can walk in front of / behind it
 			var long_x: bool = o.size.x >= o.size.y
 			var n: int = maxi(1, ceili((o.size.x if long_x else o.size.y) / 56.0))
@@ -1814,7 +1880,8 @@ func draw_world() -> void:
 	draw_labels()
 
 
-func draw_room_shell(floor_col: Color, wall_col: Color, inn: bool) -> void:
+func draw_room_shell(floor_col: Color, wall_col: Color, room: String) -> void:
+	var inn: bool = room == "inn"
 	var r0: Vector2 = ROOM.position
 	var W: float = ROOM.size.x
 	var Hh: float = ROOM.size.y
@@ -1829,6 +1896,8 @@ func draw_room_shell(floor_col: Color, wall_col: Color, inn: bool) -> void:
 			var x1: float = minf(x0 + 80.0, W)
 			var y1: float = minf(y0 + 80.0, Hh)
 			var col: Color = floor_col if (i + j) % 2 == 0 else shade(floor_col, 0.9)
+			if room == "village" and (j == 6 or (i == 3 and j < 6)):
+				col = Color(0.56, 0.46, 0.31) if (i + j) % 2 == 0 else Color(0.52, 0.42, 0.28)
 			d_poly([iso(r0 + Vector2(x0, y0)), iso(r0 + Vector2(x1, y0)), iso(r0 + Vector2(x1, y1)), iso(r0 + Vector2(x0, y1))], col)
 	var edge: Color = Color(0.1, 0.07, 0.05)
 	d_line(iso(r0 + Vector2(W, 0)), iso(r0 + Vector2(W, Hh)), edge, 3.0)
@@ -1843,16 +1912,21 @@ func draw_room_shell(floor_col: Color, wall_col: Color, inn: bool) -> void:
 			if not ok:
 				d_line(iso(Vector2(r0.x, dy0 + 10), 60.0), iso(Vector2(r0.x, dy1 - 14), 14.0), Color(0.05, 0.03, 0.02), 2.0)
 		d_poly(ellipse_pts(iso(GRUB_SPAWN), 40.0, 20.0), shade(floor_col, 0.7))
-		d_poly([iso(Vector2(ROOM.end.x - 14, 380)), iso(Vector2(ROOM.end.x, 380)), iso(Vector2(ROOM.end.x, 460)), iso(Vector2(ROOM.end.x - 14, 460))], Color(0.25, 0.45, 0.25))
 		d_poly([iso(Vector2(DOORWAY_X - 45, ROOM.end.y - 14)), iso(Vector2(DOORWAY_X + 45, ROOM.end.y - 14)), iso(Vector2(DOORWAY_X + 45, ROOM.end.y)), iso(Vector2(DOORWAY_X - 45, ROOM.end.y))], Color(0.25, 0.45, 0.25))
 		d_line(iso(Vector2(390, 684)), iso(Vector2(510, 684)), Color(0.3, 0.55, 0.8), 6.0)
 		d_line(iso(Vector2(390, 684)), iso(Vector2(510, 684)), Color(0.75, 0.93, 1.0), 2.0)
-	else:
+	elif room == "kitchen":
 		d_poly([iso(Vector2(DOORWAY_X - 45, r0.y)), iso(Vector2(DOORWAY_X + 45, r0.y)), iso(Vector2(DOORWAY_X + 45, r0.y), 66.0), iso(Vector2(DOORWAY_X - 45, r0.y), 66.0)], Color(0.22, 0.4, 0.22))
+	else:
+		# Thornbury: the north wall is the Inn's front with its door; windows; the road leaves east
+		d_poly([iso(Vector2(VDOOR_X - 40, r0.y)), iso(Vector2(VDOOR_X + 40, r0.y)), iso(Vector2(VDOOR_X + 40, r0.y), 66.0), iso(Vector2(VDOOR_X - 40, r0.y), 66.0)], Color(0.5, 0.33, 0.16))
+		for wx in [120.0, 520.0, 660.0]:
+			d_poly([iso(Vector2(wx - 22, r0.y), 56.0), iso(Vector2(wx + 22, r0.y), 56.0), iso(Vector2(wx + 22, r0.y), 30.0), iso(Vector2(wx - 22, r0.y), 30.0)], Color(0.55, 0.75, 0.9))
+		d_poly([iso(Vector2(ROOM.end.x - 14, 480)), iso(Vector2(ROOM.end.x, 480)), iso(Vector2(ROOM.end.x, 560)), iso(Vector2(ROOM.end.x - 14, 560))], Color(0.25, 0.4, 0.2))
 
 
 func draw_chunk(o: Dictionary, c: Vector2, s: Vector2) -> void:
-	var block: String = {"counter": "block_counter", "stove": "block_stove", "ktable": "block_ktable", "bar": "block_bar"}.get(o.type, "")
+	var block: String = {"counter": "block_counter", "stove": "block_stove", "ktable": "block_ktable", "bar": "block_bar", "stall": "block_stall", "smithy": "block_smithy"}.get(o.type, "")
 	if block != "" and sprite(block) != null:
 		d_sprite(block, c)
 		return
@@ -1865,13 +1939,17 @@ func draw_chunk(o: Dictionary, c: Vector2, s: Vector2) -> void:
 			cuboid(c, s, 26.0, Color(0.5, 0.4, 0.3))
 		"bar":
 			cuboid(c, s, 16.0, Color(0.42, 0.26, 0.14))
+		"stall":
+			cuboid(c, s, 36.0, Color(0.7, 0.35, 0.3))
+		"smithy":
+			cuboid(c, s, 20.0, Color(0.3, 0.3, 0.32))
 
 
 func draw_obj(o: Dictionary) -> void:
 	var p: Vector2 = o.pos
 	var sn: String = obj_sprite(o)
 	if sn != "" and sprite(sn) != null:
-		if o.type == "grub" or o.type == "innkeeper":
+		if o.type == "grub" or o.type == "innkeeper" or o.type == "npc":
 			d_poly(ellipse_pts(iso(p), 18.0, 9.0), Color(0, 0, 0, 0.35))
 		d_sprite(sn, p)
 		if o.type == "barrel" and o.state == "kicked":
@@ -1981,17 +2059,29 @@ func draw_labels() -> void:
 				txt(iso(p, 30.0) + Vector2(-14, 0), "BAR", 10, Color(1, 0.88, 0.6))
 			"counter", "stove", "ktable":
 				txt(iso(p, 40.0 if o.type == "stove" else 26.0) + Vector2(-24, 0), String(o.type).to_upper(), 10, Color(0.85, 0.85, 0.9))
+			"stall":
+				txt(iso(p, 50.0) + Vector2(-16, 0), "STALL", 10, Color(1, 0.85, 0.8))
+			"smithy":
+				txt(iso(p, 34.0) + Vector2(-20, 0), "SMITHY", 10, Color(1, 0.85, 0.7))
+			"well":
+				txt(iso(p, 34.0) + Vector2(-10, 0), "well", 10, Color(0.8, 0.9, 1.0))
+			"npc":
+				txt(iso(p, 48.0) + Vector2(-26, 0), String(NPC_NAMES.get(o.id, o.id)), 11, Color(1, 0.92, 0.7))
 	for fi in floor_items:
 		if fi.room == cur_room and pell.distance_to(fi.pos) < 120.0:
 			txt(iso(fi.pos, 22.0) + Vector2(-30, 0), String(fi.item.name), 11, Color(1, 1, 1))
 	if cur_room == "inn":
 		txt(iso(Vector2(450, 684), 4.0) + Vector2(-26, 22), "THE SEAM", 11, Color(0.7, 0.92, 1.0))
 		txt(iso(Vector2(DOORWAY_X, ROOM.end.y), 0.0) + Vector2(-26, 18), "Kitchen v", 11, Color(0.7, 0.9, 0.6))
-		txt(iso(Vector2(ROOM.end.x, 420), 0.0) + Vector2(-14, 24), "to Forest", 11, Color(0.6, 0.8, 0.55))
+		txt(iso(Vector2(ROOM.position.x, 400), 70.0) + Vector2(-18, -4), "to Village", 11, Color(0.7, 0.9, 0.6))
 		txt(iso(ROOM.position, 0.0) + Vector2(20, 0), "THE SLEEPING STAG - INN", 13, Color(0.85, 0.75, 0.6))
-	else:
+	elif cur_room == "kitchen":
 		txt(iso(Vector2(DOORWAY_X, ROOM.position.y), 74.0) + Vector2(-14, 0), "Inn ^", 11, Color(0.7, 0.9, 0.6))
 		txt(iso(ROOM.position, 0.0) + Vector2(20, 0), "INN KITCHEN", 13, Color(0.85, 0.8, 0.7))
+	else:
+		txt(iso(Vector2(VDOOR_X, ROOM.position.y), 76.0) + Vector2(-16, 0), "Inn ^", 11, Color(0.7, 0.9, 0.6))
+		txt(iso(Vector2(ROOM.end.x, 520), 0.0) + Vector2(-70, 26), "road to Gloamwood", 11, Color(0.7, 0.85, 0.55))
+		txt(iso(ROOM.position, 0.0) + Vector2(20, 0), "THORNBURY", 13, Color(0.9, 0.85, 0.65))
 	if phase == Phase.PASSAGE and hero_room == cur_room:
 		txt(iso(hero_pos, 44.0) + Vector2(-16, 14), "HERO", 11, Color(1, 0.9, 0.4))
 	if not in_cart:
